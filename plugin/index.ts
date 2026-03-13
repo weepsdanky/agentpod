@@ -209,7 +209,8 @@ const agentpodPlugin = {
     const client = pluginConfig.hubBaseUrl
       ? createAgentPodClient(
           createHttpAgentPodTransport({
-            baseUrl: pluginConfig.hubBaseUrl
+            baseUrl: pluginConfig.hubBaseUrl,
+            bearerToken: pluginConfig.pluginToken
           })
         )
       : undefined;

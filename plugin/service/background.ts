@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import type { AgentPodClient, DelegationHandle } from "../client";
 import type { ManagedNetworkProfile, PeerProfile, PrivateNetworkProfile } from "../types/agentpod";
 import { resolveProfile, type ProfileResolverDependencies, type ResolvedProfile } from "../config";
+import { signCapabilityManifest } from "../identity/keys";
 import { loadOrCreateLocalPeerIdentity } from "../identity/store";
 import { compileAgentPodSource } from "../source-doc/compiler";
 import { createStateStore, type AgentPodState } from "../state/store";
@@ -80,13 +81,13 @@ export function createBackgroundService(options: BackgroundServiceOptions) {
       return false;
     }
 
-    const task = await options.client.claimInboundTask(identity.peer_id);
+    const task = await options.client.claimInboundTask(identity);
     if (!task) {
       return false;
     }
 
     await service.executeInboundTask(task, async (event) => {
-      await options.client?.publishTaskEvent?.(task.task_id, event.data);
+      await options.client?.publishTaskEvent?.(task.task_id, event.data, identity);
     });
 
     return true;
@@ -100,7 +101,16 @@ export function createBackgroundService(options: BackgroundServiceOptions) {
     mailboxLoop = (async () => {
       try {
         while (running) {
-          const processed = await processMailboxOnce();
+          let processed = false;
+          try {
+            processed = await processMailboxOnce();
+          } catch (error) {
+            console.warn(
+              "[agentpod] mailbox polling failed",
+              error instanceof Error ? error.message : String(error)
+            );
+            processed = false;
+          }
           if (processed) {
             continue;
           }
@@ -165,12 +175,16 @@ export function createBackgroundService(options: BackgroundServiceOptions) {
       const source = await readFile(agentpodDocPath, "utf8");
       const issuedAt = new Date().toISOString();
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-      const manifest = compileAgentPodSource(source, {
+      const compiledManifest = compileAgentPodSource(source, {
         peerId: identity.peer_id,
         issuedAt,
         expiresAt,
-        signature: `local:${identity.key_fingerprint}`
+        signature: ""
       });
+      const manifest = {
+        ...compiledManifest,
+        signature: signCapabilityManifest(identity, compiledManifest)
+      };
       const peers = await this.publishManifest(manifest);
 
       return {

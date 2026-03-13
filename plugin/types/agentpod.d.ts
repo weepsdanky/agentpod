@@ -42,6 +42,13 @@ export interface PeerProfile {
   last_seen_at: string;
 }
 
+export interface RuntimePeerAuth {
+  peer_id: string;
+  public_key: string;
+  key_fingerprint: string;
+  signature: string;
+}
+
 export interface CapabilityManifest {
   version: ProtocolVersion;
   peer_id: string;

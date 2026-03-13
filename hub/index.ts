@@ -183,6 +183,7 @@ export function parseHubCliArgs(argv: string[]): ParsedHubCliArgs {
     issuer: args.get("--issuer") ?? `${networkId}-operator`,
     manifestSignature: args.get("--manifest-signature") ?? "local-dev-signature",
     operatorToken: args.get("--operator-token") ?? "agentpod-local-operator-token",
+    runtimeToken: args.get("--runtime-token") ?? undefined,
     mailboxStatePath:
       args.get("--mailbox-state-path") ?? ".agentpod-hub/mailbox-state.json",
     discoveryRecords: [],
@@ -202,6 +203,7 @@ function defaultHubCliArgs(): HubServerOptions {
     issuer: "agentpod-local-operator",
     manifestSignature: "local-dev-signature",
     operatorToken: "agentpod-local-operator-token",
+    runtimeToken: undefined,
     mailboxStatePath: ".agentpod-hub/mailbox-state.json",
     discoveryRecords: [],
     peerProfiles: []
@@ -217,6 +219,7 @@ function printHubHelp() {
   process.stdout.write(`  --network-id <id>            Network id (default: agentpod-local)\n`);
   process.stdout.write(`  --base-url <url>             Public base URL used in returned endpoints\n`);
   process.stdout.write(`  --operator-token <token>     Operator token for revoke endpoint\n`);
+  process.stdout.write(`  --runtime-token <token>      Runtime token for mailbox/event endpoints\n`);
   process.stdout.write(`  --mailbox-state-path <path>  JSON file for persisted mailbox state\n`);
   process.stdout.write(`  --help                       Show this help\n`);
 }

@@ -1,15 +1,19 @@
 import type {
   CapabilityManifest,
   PeerProfile,
+  RuntimePeerAuth,
   TaskRequest,
   TaskResult,
   TaskUpdate
 } from "./types/agentpod";
+import type { LocalPeerIdentity } from "./identity/keys";
+import { createRuntimePeerAuth } from "./identity/keys";
 
 export interface AgentPodTransportRequest {
   method: "GET" | "POST";
   path: string;
   body?: Record<string, unknown>;
+  headers?: Record<string, string>;
 }
 
 export interface AgentPodTransportEvent {
@@ -34,8 +38,12 @@ export interface AgentPodClient {
   publishManifest(manifest: CapabilityManifest): Promise<void>;
   listPeers(): Promise<PeerProfile[]>;
   delegate(task: TaskRequest): Promise<DelegationHandle>;
-  claimInboundTask(peerId: string): Promise<TaskRequest | null>;
-  publishTaskEvent(taskId: string, event: TaskUpdate | TaskResult): Promise<void>;
+  claimInboundTask(identity: LocalPeerIdentity): Promise<TaskRequest | null>;
+  publishTaskEvent(
+    taskId: string,
+    event: TaskUpdate | TaskResult,
+    identity: LocalPeerIdentity
+  ): Promise<void>;
   subscribeTask(
     taskId: string,
     onEvent: (event: TaskUpdate | TaskResult) => void
@@ -45,6 +53,7 @@ export interface AgentPodClient {
 interface HttpAgentPodTransportOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
+  bearerToken?: string;
 }
 
 export function createAgentPodClient(transport: AgentPodTransport): AgentPodClient {
@@ -74,29 +83,45 @@ export function createAgentPodClient(transport: AgentPodTransport): AgentPodClie
       })) as DelegationHandle;
     },
 
-    async claimInboundTask(peerId) {
+    async claimInboundTask(identity) {
+      const auth = createSignedRuntimeAuth(identity, {
+        path: "/v1/runtime/mailbox/claim",
+        peer_id: identity.peer_id
+      });
       const response = (await transport.request({
         method: "POST",
         path: "/v1/runtime/mailbox/claim",
         body: {
-          peer_id: peerId
+          peer_id: identity.peer_id,
+          auth
         }
       })) as { task?: TaskRequest | null };
 
       return response.task ?? null;
     },
 
-    async publishTaskEvent(taskId, event) {
+    async publishTaskEvent(taskId, event, identity) {
       const kind = "status" in event ? "result" : "update";
+      const auth = createSignedRuntimeAuth(identity, {
+        path: "/v1/runtime/tasks/event",
+        peer_id: identity.peer_id,
+        task_id: taskId,
+        event: {
+          kind,
+          data: event
+        }
+      });
       await transport.request({
         method: "POST",
         path: "/v1/runtime/tasks/event",
         body: {
+          peer_id: identity.peer_id,
           task_id: taskId,
           event: {
             kind,
             data: event
-          }
+          },
+          auth
         }
       });
     },
@@ -109,19 +134,33 @@ export function createAgentPodClient(transport: AgentPodTransport): AgentPodClie
   };
 }
 
+function createSignedRuntimeAuth(
+  identity: LocalPeerIdentity,
+  payload: Record<string, unknown>
+): RuntimePeerAuth {
+  return createRuntimePeerAuth(identity, payload);
+}
+
 export function createHttpAgentPodTransport(
   options: HttpAgentPodTransportOptions
 ): AgentPodTransport {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const fetchImpl = options.fetchImpl ?? fetch;
+  const authorization = options.bearerToken ? `Bearer ${options.bearerToken}` : undefined;
 
   return {
     async request(request) {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        ...(request.headers ?? {})
+      };
+      if (authorization) {
+        headers.authorization = authorization;
+      }
+
       const response = await fetchImpl(`${baseUrl}${request.path}`, {
         method: request.method,
-        headers: {
-          "content-type": "application/json"
-        },
+        headers,
         body: request.body ? JSON.stringify(request.body) : undefined
       });
       const body = (await response.json()) as unknown;
@@ -138,7 +177,8 @@ export function createHttpAgentPodTransport(
       const response = await fetchImpl(`${baseUrl}${path}`, {
         method: "GET",
         headers: {
-          accept: "text/event-stream"
+          accept: "text/event-stream",
+          ...(authorization ? { authorization } : {})
         },
         signal: abortController.signal
       });

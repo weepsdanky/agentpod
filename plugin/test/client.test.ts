@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { CapabilityManifest, PeerProfile, TaskRequest, TaskResult, TaskUpdate } from "../types/agentpod";
 import { createAgentPodClient } from "../client";
+import { generateLocalPeerIdentity } from "../identity/keys";
 
 describe("AgentPod client", () => {
   it("publishes a manifest through the hub transport", async () => {
@@ -143,13 +144,20 @@ describe("AgentPod client", () => {
     };
     const request = vi.fn().mockResolvedValue({ task });
     const client = createAgentPodClient({ request, subscribe: vi.fn() });
+    const identity = generateLocalPeerIdentity();
 
-    await expect(client.claimInboundTask("peer_remote")).resolves.toEqual(task);
+    await expect(client.claimInboundTask(identity)).resolves.toEqual(task);
     expect(request).toHaveBeenCalledWith({
       method: "POST",
       path: "/v1/runtime/mailbox/claim",
       body: {
-        peer_id: "peer_remote"
+        peer_id: identity.peer_id,
+        auth: expect.objectContaining({
+          peer_id: identity.peer_id,
+          public_key: identity.public_key,
+          key_fingerprint: identity.key_fingerprint,
+          signature: expect.any(String)
+        })
       }
     });
   });
@@ -157,6 +165,7 @@ describe("AgentPod client", () => {
   it("publishes runtime task events back to the hub", async () => {
     const request = vi.fn().mockResolvedValue({ ok: true });
     const client = createAgentPodClient({ request, subscribe: vi.fn() });
+    const identity = generateLocalPeerIdentity();
     const event: TaskUpdate = {
       version: "0.1",
       task_id: "task_123",
@@ -166,16 +175,23 @@ describe("AgentPod client", () => {
       timestamp: "2026-03-13T09:00:00Z"
     };
 
-    await client.publishTaskEvent("task_123", event);
+    await client.publishTaskEvent("task_123", event, identity);
     expect(request).toHaveBeenCalledWith({
       method: "POST",
       path: "/v1/runtime/tasks/event",
       body: {
+        peer_id: identity.peer_id,
         task_id: "task_123",
         event: {
           kind: "update",
           data: event
-        }
+        },
+        auth: expect.objectContaining({
+          peer_id: identity.peer_id,
+          public_key: identity.public_key,
+          key_fingerprint: identity.key_fingerprint,
+          signature: expect.any(String)
+        })
       }
     });
   });

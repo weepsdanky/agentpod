@@ -9,4 +9,5 @@ export interface HubConfig {
   issuer: string;
   manifestSignature: string;
   operatorToken: string;
+  runtimeToken?: string;
 }

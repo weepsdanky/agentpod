@@ -1,3 +1,4 @@
+import { verify } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -75,6 +76,31 @@ describe("AgentPod background service", () => {
 
     expect(firstIdentity.peer_id).toMatch(/^peer_/);
     expect(secondIdentity).toEqual(firstIdentity);
+  });
+
+  it("fails fast on legacy persisted identities without a private key", async () => {
+    const statePath = join(tempDir, "state.json");
+    const identityPath = join(tempDir, "identity.json");
+    await writeFile(
+      identityPath,
+      JSON.stringify(
+        {
+          peer_id: "peer_legacy123456",
+          public_key: "legacy-public-key",
+          key_fingerprint: "sha256:legacy"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    expect(() =>
+      createBackgroundService({
+        statePath,
+        identityPath
+      })
+    ).toThrow(/missing a private key/i);
   });
 
   it("rejects activating a second profile while one is already active", async () => {
@@ -341,7 +367,14 @@ describe("AgentPod background service", () => {
     });
     await (service as any).processMailboxOnce();
 
-    expect(claimInboundTask).toHaveBeenCalledWith(expect.stringMatching(/^peer_/));
+    expect(claimInboundTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        peer_id: expect.stringMatching(/^peer_/),
+        public_key: expect.any(String),
+        key_fingerprint: expect.stringMatching(/^sha256:/),
+        private_key: expect.any(String)
+      })
+    );
     expect(publishTaskEvent).toHaveBeenCalledTimes(2);
     expect(publishTaskEvent).toHaveBeenNthCalledWith(
       1,
@@ -350,6 +383,9 @@ describe("AgentPod background service", () => {
         version: "0.1",
         task_id: "task_mailbox_456",
         state: "running"
+      }),
+      expect.objectContaining({
+        peer_id: expect.stringMatching(/^peer_/)
       })
     );
     expect(publishTaskEvent).toHaveBeenNthCalledWith(
@@ -367,7 +403,105 @@ describe("AgentPod background service", () => {
           used_tools: [],
           used_network: false
         }
+      },
+      expect.objectContaining({
+        peer_id: expect.stringMatching(/^peer_/)
+      })
+    );
+  });
+
+  it("keeps polling after a transient mailbox failure", async () => {
+    vi.useFakeTimers();
+    const task: TaskRequest = {
+      version: "0.1",
+      task_id: "task_mailbox_retry_123",
+      target_peer_id: "peer_mailbox",
+      service: "draft_review",
+      input: {
+        payload: { text: "Retry mailbox processing after a transient error" },
+        attachments: []
+      },
+      delivery: {
+        reply: "origin_session",
+        artifacts: "inline_only"
       }
+    };
+    const publishTaskEvent = vi.fn(async () => undefined);
+    const claimInboundTask = vi
+      .fn<() => Promise<TaskRequest | null>>()
+      .mockRejectedValueOnce(new Error("temporary hub outage"))
+      .mockResolvedValueOnce(task)
+      .mockResolvedValue(null);
+    const service = createBackgroundService({
+      statePath: join(tempDir, "state.json"),
+      pollIntervalMs: 5,
+      client: {
+        publishManifest: vi.fn(async () => undefined),
+        listPeers: vi.fn(async () => []),
+        delegate: vi.fn(async () => ({
+          task_id: "unused",
+          status: "queued"
+        })),
+        subscribeTask: vi.fn(async () => () => undefined),
+        claimInboundTask,
+        publishTaskEvent
+      },
+      inboundRunner: {
+        accept: vi.fn(async () => ({
+          accepted: true as const,
+          childSessionKey: "child_mailbox_retry_123",
+          runId: "run_mailbox_retry_123"
+        })),
+        awaitResult: vi.fn(async () => ({
+          version: "0.1" as const,
+          task_id: "task_mailbox_retry_123",
+          status: "completed" as const,
+          output: {
+            text: "Recovered after a transient mailbox error"
+          },
+          artifacts: [],
+          execution_summary: {
+            used_tools: [],
+            used_network: false
+          }
+        }))
+      }
+    });
+
+    await service.start("public", {
+      mode: "managed",
+      join_url: "https://agentpod.ai/networks/public"
+    });
+
+    await vi.advanceTimersByTimeAsync(20);
+    await service.stop();
+    vi.useRealTimers();
+
+    expect(claimInboundTask).toHaveBeenCalledTimes(2);
+    expect(publishTaskEvent).toHaveBeenCalledTimes(2);
+    expect(publishTaskEvent).toHaveBeenNthCalledWith(
+      1,
+      "task_mailbox_retry_123",
+      expect.objectContaining({
+        version: "0.1",
+        task_id: "task_mailbox_retry_123",
+        state: "running"
+      }),
+      expect.objectContaining({
+        peer_id: expect.stringMatching(/^peer_/)
+      })
+    );
+    expect(publishTaskEvent).toHaveBeenNthCalledWith(
+      2,
+      "task_mailbox_retry_123",
+      expect.objectContaining({
+        version: "0.1",
+        task_id: "task_mailbox_retry_123",
+        status: "completed"
+      }),
+      expect.objectContaining({
+        peer_id: expect.stringMatching(/^peer_/)
+      })
     );
   });
 
@@ -429,10 +563,12 @@ Helps with product brainstorming.
     const result = await service.publishFromSource();
 
     expect(publishManifest).toHaveBeenCalledOnce();
-    expect(publishManifest).toHaveBeenCalledWith(
+    const publishedManifest = publishManifest.mock.calls[0]?.[0];
+    expect(publishedManifest).toEqual(
       expect.objectContaining({
         version: "0.1",
         peer_id: expect.stringMatching(/^peer_/),
+        signature: expect.any(String),
         services: [
           expect.objectContaining({
             id: "product_brainstorm"
@@ -440,6 +576,23 @@ Helps with product brainstorming.
         ]
       })
     );
+    expect(publishedManifest.signature).not.toMatch(/^local:/);
+    expect(
+      verify(
+        null,
+        Buffer.from(
+          JSON.stringify({
+            version: publishedManifest.version,
+            peer_id: publishedManifest.peer_id,
+            issued_at: publishedManifest.issued_at,
+            expires_at: publishedManifest.expires_at,
+            services: publishedManifest.services
+          })
+        ),
+        service.snapshot().identity.public_key,
+        Buffer.from(publishedManifest.signature, "base64")
+      )
+    ).toBe(true);
     expect(result).toEqual({
       ok: true,
       peer_id: expect.stringMatching(/^peer_/),

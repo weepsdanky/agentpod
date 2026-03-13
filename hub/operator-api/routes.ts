@@ -1,3 +1,5 @@
+import { createHash, verify } from "node:crypto";
+
 import type { HubConfig } from "../config/schema";
 import { createJoinManifest } from "../join/manifest";
 import { createRevocationStore } from "../join/revocation";
@@ -6,7 +8,13 @@ import { renewToken, type TokenRenewRequest } from "../join/token-renew";
 import { createInMemoryDiscoveryWiring, type DiscoveryRecord } from "../openagents/wiring";
 import { projectPublicCards } from "../projection/public-card";
 import { createMailboxStore } from "../state/mailbox-store";
-import type { CapabilityManifest, TaskRequest, TaskResult, TaskUpdate } from "../../plugin/types/agentpod";
+import type {
+  CapabilityManifest,
+  RuntimePeerAuth,
+  TaskRequest,
+  TaskResult,
+  TaskUpdate
+} from "../../plugin/types/agentpod";
 
 type HttpMethod = "GET" | "POST";
 
@@ -39,6 +47,26 @@ interface HubRouterConfig extends HubConfig {
   mailboxStatePath?: string;
 }
 
+function verifySignedRuntimePeer(
+  auth: RuntimePeerAuth,
+  payload: Record<string, unknown>
+) {
+  const fingerprint = createHash("sha256").update(auth.public_key).digest("hex");
+  if (
+    auth.peer_id !== `peer_${fingerprint.slice(0, 12)}` ||
+    auth.key_fingerprint !== `sha256:${fingerprint}`
+  ) {
+    return false;
+  }
+
+  return verify(
+    null,
+    Buffer.from(JSON.stringify(payload)),
+    auth.public_key,
+    Buffer.from(auth.signature, "base64")
+  );
+}
+
 export function createHubRouter(config: HubRouterConfig) {
   const revocations = createRevocationStore();
   const tokens = createTokenStore(config, revocations);
@@ -47,11 +75,68 @@ export function createHubRouter(config: HubRouterConfig) {
   const peerProfiles = [...(config.peerProfiles ?? [])];
   const taskSubscribers = new Map<string, Array<(event: TaskStreamEvent) => void>>();
   const mailboxStore = createMailboxStore(config.mailboxStatePath);
+  const taskBindings = new Map<string, string>();
 
   function publishTaskEvent(taskId: string, event: TaskStreamEvent) {
     for (const subscriber of taskSubscribers.get(taskId) ?? []) {
       subscriber(event);
     }
+  }
+
+  function requireRuntimeToken(request: RouterRequest): RouterResponse | null {
+    if (!config.runtimeToken) {
+      return null;
+    }
+
+    if (request.headers?.authorization === `Bearer ${config.runtimeToken}`) {
+      return null;
+    }
+
+    return {
+      status: 401,
+      body: {
+        error: "runtime_auth_required"
+      }
+    };
+  }
+
+  function requireSignedRuntimePeer(
+    request: RouterRequest,
+    payload: Record<string, unknown>
+  ): { peerId: string } | RouterResponse {
+    const runtimeTokenError = requireRuntimeToken(request);
+    if (runtimeTokenError) {
+      return runtimeTokenError;
+    }
+
+    const auth = request.body?.auth as RuntimePeerAuth | undefined;
+    if (
+      !auth ||
+      typeof auth.peer_id !== "string" ||
+      typeof auth.public_key !== "string" ||
+      typeof auth.key_fingerprint !== "string" ||
+      typeof auth.signature !== "string"
+    ) {
+      return {
+        status: 401,
+        body: {
+          error: "runtime_auth_required"
+        }
+      };
+    }
+
+    if (!verifySignedRuntimePeer(auth, payload)) {
+      return {
+        status: 403,
+        body: {
+          error: "invalid_runtime_signature"
+        }
+      };
+    }
+
+    return {
+      peerId: auth.peer_id
+    };
   }
 
   return {
@@ -191,8 +276,35 @@ export function createHubRouter(config: HubRouterConfig) {
       }
 
       if (request.method === "POST" && request.path === "/v1/runtime/mailbox/claim") {
-        const peerId = String(request.body?.peer_id ?? "");
-        const task = await mailboxStore.claim(peerId);
+        const requestedPeerId = String(request.body?.peer_id ?? "");
+        const runtimePeer = requireSignedRuntimePeer(request, {
+          path: "/v1/runtime/mailbox/claim",
+          peer_id: requestedPeerId
+        });
+        if ("status" in runtimePeer) {
+          return runtimePeer;
+        }
+        if (runtimePeer.peerId !== requestedPeerId) {
+          return {
+            status: 403,
+            body: {
+              error: "runtime_peer_mismatch"
+            }
+          };
+        }
+
+        const task = await mailboxStore.claim(requestedPeerId);
+        if (task?.target_peer_id && task.target_peer_id !== runtimePeer.peerId) {
+          return {
+            status: 403,
+            body: {
+              error: "runtime_peer_mismatch"
+            }
+          };
+        }
+        if (task) {
+          taskBindings.set(task.task_id, runtimePeer.peerId);
+        }
 
         return {
           status: 200,
@@ -205,8 +317,37 @@ export function createHubRouter(config: HubRouterConfig) {
       if (request.method === "POST" && request.path === "/v1/runtime/tasks/event") {
         const taskId = String(request.body?.task_id ?? "");
         const event = request.body?.event as TaskStreamEvent | undefined;
+        const peerId = String(request.body?.peer_id ?? "");
+        const runtimePeer = requireSignedRuntimePeer(request, {
+          path: "/v1/runtime/tasks/event",
+          peer_id: peerId,
+          task_id: taskId,
+          event
+        });
+        if ("status" in runtimePeer) {
+          return runtimePeer;
+        }
+        if (runtimePeer.peerId !== peerId) {
+          return {
+            status: 403,
+            body: {
+              error: "runtime_peer_mismatch"
+            }
+          };
+        }
+        if (taskBindings.get(taskId) !== peerId) {
+          return {
+            status: 403,
+            body: {
+              error: "runtime_peer_mismatch"
+            }
+          };
+        }
         if (taskId && event && (event.kind === "update" || event.kind === "result")) {
           publishTaskEvent(taskId, event);
+          if (event.kind === "result") {
+            taskBindings.delete(taskId);
+          }
           return {
             status: 200,
             body: {

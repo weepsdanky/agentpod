@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentPodClient, createHttpAgentPodTransport } from "../client";
+import { generateLocalPeerIdentity } from "../identity/keys";
 import { startHubServer, type RunningHubServer } from "../../hub/index";
 import type { TaskResult, TaskUpdate } from "../types/agentpod";
 
@@ -97,5 +98,33 @@ describe("AgentPod HTTP transport", () => {
         }
       }
     ]);
+  });
+
+  it("adds bearer auth headers when configured", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true })
+    }));
+    const client = createAgentPodClient(
+      createHttpAgentPodTransport({
+        baseUrl: "https://agentpod.example.com",
+        bearerToken: "runtime-secret",
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      })
+    );
+    const identity = generateLocalPeerIdentity();
+
+    await client.claimInboundTask(identity);
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://agentpod.example.com/v1/runtime/mailbox/claim",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "content-type": "application/json",
+          authorization: "Bearer runtime-secret"
+        })
+      })
+    );
   });
 });

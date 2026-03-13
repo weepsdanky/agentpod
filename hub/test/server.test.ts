@@ -1,3 +1,4 @@
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHubServer, type RunningHubServer } from "../index";
 import { createHubRouter } from "../operator-api/routes";
+
+function generateRuntimeIdentity() {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const public_key = publicKey.export({ format: "pem", type: "spki" }).toString();
+  const private_key = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  const fingerprint = createHash("sha256").update(public_key).digest("hex");
+
+  return {
+    peer_id: `peer_${fingerprint.slice(0, 12)}`,
+    public_key,
+    private_key,
+    key_fingerprint: `sha256:${fingerprint}`
+  };
+}
+
+function createRuntimePeerAuth(
+  identity: ReturnType<typeof generateRuntimeIdentity>,
+  payload: Record<string, unknown>
+) {
+  return {
+    peer_id: identity.peer_id,
+    public_key: identity.public_key,
+    key_fingerprint: identity.key_fingerprint,
+    signature: sign(null, Buffer.from(JSON.stringify(payload)), identity.private_key).toString(
+      "base64"
+    )
+  };
+}
 
 describe("AgentPod hub router", () => {
   let server: RunningHubServer | null = null;
@@ -20,6 +49,43 @@ describe("AgentPod hub router", () => {
     server = null;
     await rm(tempDir, { recursive: true, force: true });
   });
+
+  function createClaimBody(peerIdOverride?: string) {
+    const identity = generateRuntimeIdentity();
+    const peer_id = peerIdOverride ?? identity.peer_id;
+
+    return {
+      identity,
+      body: {
+        peer_id,
+        auth: createRuntimePeerAuth(identity, {
+          path: "/v1/runtime/mailbox/claim",
+          peer_id
+        })
+      }
+    };
+  }
+
+  function createEventBody(input: {
+    identity: ReturnType<typeof generateRuntimeIdentity>;
+    taskId: string;
+    event: Record<string, unknown>;
+    peerIdOverride?: string;
+  }) {
+    const peer_id = input.peerIdOverride ?? input.identity.peer_id;
+
+    return {
+      peer_id,
+      task_id: input.taskId,
+      event: input.event,
+      auth: createRuntimePeerAuth(input.identity, {
+        path: "/v1/runtime/tasks/event",
+        peer_id,
+        task_id: input.taskId,
+        event: input.event
+      })
+    };
+  }
 
   it("returns signed managed join manifest metadata", async () => {
     const router = createHubRouter({
@@ -487,6 +553,7 @@ describe("AgentPod hub router", () => {
   });
 
   it("queues targeted tasks in a peer mailbox and relays runtime events", async () => {
+    const { identity, body: claimBody } = createClaimBody();
     const router = createHubRouter({
       mode: "managed",
       networkId: "agentpod-public",
@@ -512,7 +579,7 @@ describe("AgentPod hub router", () => {
           task: {
             version: "0.1",
             task_id: "task_mailbox_123",
-            target_peer_id: "peer_remote",
+            target_peer_id: identity.peer_id,
             service: "product_brainstorm",
             input: {
               payload: { text: "Queue this for the remote peer" },
@@ -537,16 +604,14 @@ describe("AgentPod hub router", () => {
       router.handle({
         method: "POST",
         path: "/v1/runtime/mailbox/claim",
-        body: {
-          peer_id: "peer_remote"
-        }
+        body: claimBody
       })
     ).resolves.toMatchObject({
       status: 200,
       body: {
         task: expect.objectContaining({
           task_id: "task_mailbox_123",
-          target_peer_id: "peer_remote"
+          target_peer_id: identity.peer_id
         })
       }
     });
@@ -555,9 +620,7 @@ describe("AgentPod hub router", () => {
       router.handle({
         method: "POST",
         path: "/v1/runtime/mailbox/claim",
-        body: {
-          peer_id: "peer_remote"
-        }
+        body: claimBody
       })
     ).resolves.toEqual({
       status: 200,
@@ -569,8 +632,9 @@ describe("AgentPod hub router", () => {
     await router.handle({
       method: "POST",
       path: "/v1/runtime/tasks/event",
-      body: {
-        task_id: "task_mailbox_123",
+      body: createEventBody({
+        identity,
+        taskId: "task_mailbox_123",
         event: {
           kind: "update",
           data: {
@@ -582,7 +646,7 @@ describe("AgentPod hub router", () => {
             timestamp: "2026-03-13T09:30:00Z"
           }
         }
-      }
+      })
     });
 
     expect(events).toEqual([
@@ -600,7 +664,116 @@ describe("AgentPod hub router", () => {
     ]);
   });
 
+  it("rejects unauthenticated runtime mailbox access and event publishing", async () => {
+    const { identity } = createClaimBody();
+    const router = createHubRouter({
+      mode: "managed",
+      networkId: "agentpod-public",
+      directoryUrl: "https://agentpod.ai/directory",
+      substrateUrl: "wss://agentpod.ai/substrate",
+      operatorKeyId: "operator-key-2026-03",
+      issuer: "agentpod-public-operator",
+      manifestSignature: "manifest-signature",
+      operatorToken: "operator-secret",
+      discoveryRecords: []
+    });
+
+    await expect(
+      router.handle({
+        method: "POST",
+        path: "/v1/runtime/mailbox/claim",
+        body: {
+          peer_id: "peer_remote"
+        }
+      })
+    ).resolves.toEqual({
+      status: 401,
+      body: {
+        error: "runtime_auth_required"
+      }
+    });
+
+    await expect(
+      router.handle({
+        method: "POST",
+        path: "/v1/runtime/tasks/event",
+        body: {
+          peer_id: identity.peer_id,
+          task_id: "task_mailbox_123",
+          event: {
+            kind: "update",
+            data: {
+              version: "0.1",
+              task_id: "task_mailbox_123",
+              state: "running",
+              message: "spoofed",
+              timestamp: "2026-03-13T09:30:00Z"
+            }
+          }
+        }
+      })
+    ).resolves.toEqual({
+      status: 401,
+      body: {
+        error: "runtime_auth_required"
+      }
+    });
+  });
+
+  it("rejects runtime requests signed by the wrong peer identity", async () => {
+    const claimed = createClaimBody();
+    const impostor = createClaimBody(claimed.identity.peer_id);
+    const router = createHubRouter({
+      mode: "managed",
+      networkId: "agentpod-public",
+      directoryUrl: "https://agentpod.ai/directory",
+      substrateUrl: "wss://agentpod.ai/substrate",
+      operatorKeyId: "operator-key-2026-03",
+      issuer: "agentpod-public-operator",
+      manifestSignature: "manifest-signature",
+      operatorToken: "operator-secret",
+      discoveryRecords: []
+    });
+
+    await expect(
+      router.handle({
+        method: "POST",
+        path: "/v1/tasks/delegate",
+        body: {
+          task: {
+            version: "0.1",
+            task_id: "task_mailbox_auth_123",
+            target_peer_id: claimed.identity.peer_id,
+            service: "product_brainstorm",
+            input: {
+              payload: { text: "Queue this for the signed peer" },
+              attachments: []
+            },
+            delivery: {
+              reply: "origin_session",
+              artifacts: "inline_only"
+            }
+          }
+        }
+      })
+    ).resolves.toMatchObject({ status: 200 });
+
+    await expect(
+      router.handle({
+        method: "POST",
+        path: "/v1/runtime/mailbox/claim",
+        body: impostor.body
+      })
+    ).resolves.toEqual({
+      status: 403,
+      body: {
+        error: "runtime_peer_mismatch"
+      }
+    });
+  });
+
   it("persists queued mailbox tasks across router restarts", async () => {
+    const { identity, body: claimBody } = createClaimBody();
     const mailboxStatePath = join(tempDir, "mailbox.json");
     const firstRouter = createHubRouter({
       mode: "managed",
@@ -623,7 +796,7 @@ describe("AgentPod hub router", () => {
           task: {
             version: "0.1",
             task_id: "task_mailbox_persist_123",
-            target_peer_id: "peer_remote",
+            target_peer_id: identity.peer_id,
             service: "product_brainstorm",
             input: {
               payload: { text: "Persist this queued task" },
@@ -661,16 +834,14 @@ describe("AgentPod hub router", () => {
       restartedRouter.handle({
         method: "POST",
         path: "/v1/runtime/mailbox/claim",
-        body: {
-          peer_id: "peer_remote"
-        }
+        body: claimBody
       })
     ).resolves.toMatchObject({
       status: 200,
       body: {
         task: expect.objectContaining({
           task_id: "task_mailbox_persist_123",
-          target_peer_id: "peer_remote"
+          target_peer_id: identity.peer_id
         })
       }
     });
