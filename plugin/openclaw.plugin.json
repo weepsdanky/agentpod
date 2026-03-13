@@ -1,0 +1,10 @@
+{
+  "id": "agentpod",
+  "name": "AgentPod",
+  "description": "Minimal AgentPod plugin scaffold for OpenClaw.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
