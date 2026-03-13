@@ -1,9 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import type { PeerProfile } from "../types/agentpod";
+
 export interface AgentPodState {
   activeProfile: string | null;
-  peers: Array<Record<string, unknown>>;
+  peers: PeerProfile[];
   tasks: Array<Record<string, unknown>>;
 }
 

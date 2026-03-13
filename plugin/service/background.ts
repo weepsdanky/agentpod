@@ -1,4 +1,4 @@
-import type { ManagedNetworkProfile, PrivateNetworkProfile } from "../types/agentpod";
+import type { ManagedNetworkProfile, PeerProfile, PrivateNetworkProfile } from "../types/agentpod";
 import { resolveProfile, type ProfileResolverDependencies, type ResolvedProfile } from "../config";
 import { generateLocalPeerIdentity } from "../identity/keys";
 import { createStateStore, type AgentPodState } from "../state/store";
@@ -13,7 +13,7 @@ type StartProfile = ManagedNetworkProfile | PrivateNetworkProfile;
 
 export function createBackgroundService(options: BackgroundServiceOptions) {
   const store = createStateStore(options.statePath);
-  const peerCache = createPeerCache();
+  const peerCache = createPeerCache<PeerProfile>();
   const substrateSync = createSubstrateSync(peerCache);
   const identity = generateLocalPeerIdentity();
 
@@ -84,7 +84,7 @@ export function createBackgroundService(options: BackgroundServiceOptions) {
       };
     },
 
-    syncPeers(peers: Array<Record<string, unknown>>) {
+    syncPeers(peers: PeerProfile[]) {
       const nextPeers = substrateSync.refresh(peers);
       state.peers = nextPeers;
       return nextPeers;

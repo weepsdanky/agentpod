@@ -1,11 +1,11 @@
-export function createPeerCache(initialPeers: Array<Record<string, unknown>> = []) {
+export function createPeerCache<T>(initialPeers: T[] = []) {
   let peers = [...initialPeers];
 
   return {
     list() {
       return peers;
     },
-    replace(nextPeers: Array<Record<string, unknown>>) {
+    replace(nextPeers: T[]) {
       peers = [...nextPeers];
     }
   };
