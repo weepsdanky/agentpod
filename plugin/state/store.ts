@@ -1,48 +1,41 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import type { PeerProfile } from "../types/agentpod";
-
-export interface TaskSnapshot {
-  task_id: string;
-  status: string;
+export interface AgentPodState {
+  activeProfile: string | null;
+  peers: Array<Record<string, unknown>>;
+  tasks: Array<Record<string, unknown>>;
 }
 
-export interface StateSnapshot {
-  peers: PeerProfile[];
-  tasks: TaskSnapshot[];
-}
-
-export interface FileStateStore {
-  load(): Promise<StateSnapshot>;
-  save(snapshot: StateSnapshot): Promise<void>;
-}
-
-const EMPTY_STATE: StateSnapshot = {
+const DEFAULT_STATE: AgentPodState = {
+  activeProfile: null,
   peers: [],
   tasks: []
 };
 
-export function createFileStateStore(path: string): FileStateStore {
+export function createStateStore(path: string) {
   return {
-    async load() {
+    async load(): Promise<AgentPodState> {
       try {
-        const raw = await readFile(path, "utf8");
+        const content = await readFile(path, "utf8");
+        const parsed = JSON.parse(content) as Partial<AgentPodState>;
+
         return {
-          ...EMPTY_STATE,
-          ...(JSON.parse(raw) as Partial<StateSnapshot>)
+          activeProfile: parsed.activeProfile ?? null,
+          peers: parsed.peers ?? [],
+          tasks: parsed.tasks ?? []
         };
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          return EMPTY_STATE;
+          return structuredClone(DEFAULT_STATE);
         }
         throw error;
       }
     },
 
-    async save(snapshot) {
+    async save(state: AgentPodState): Promise<void> {
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, JSON.stringify(snapshot, null, 2));
+      await writeFile(path, JSON.stringify(state, null, 2), "utf8");
     }
   };
 }

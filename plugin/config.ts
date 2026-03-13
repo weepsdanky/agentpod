@@ -1,52 +1,53 @@
-import type {
-  ManagedNetworkProfile,
-  PrivateNetworkProfile,
-  PublicCardVisibility
-} from "./types/agentpod";
+import type { ManagedNetworkProfile, PrivateNetworkProfile } from "./types/agentpod";
 
-export interface AgentPodConfigInput {
-  activeProfile?: string;
-  profiles: Record<string, ManagedNetworkProfile | PrivateNetworkProfile>;
+export interface JoinManifest {
+  network_id: string;
+  directory_url: string;
+  substrate_url: string;
+}
+
+export interface ProfileResolverDependencies {
+  fetchJoinManifest?: (joinUrl: string) => Promise<JoinManifest>;
 }
 
 export interface ResolvedManagedProfile extends ManagedNetworkProfile {
-  name: string;
+  network_id: string;
+  directory_url: string;
+  substrate_url: string;
 }
 
 export interface ResolvedPrivateProfile extends PrivateNetworkProfile {
-  name: string;
   directory_url: string;
   substrate_url: string;
-  public_card_visibility?: PublicCardVisibility;
 }
 
 export type ResolvedProfile = ResolvedManagedProfile | ResolvedPrivateProfile;
 
-export function resolveActiveProfile(config: AgentPodConfigInput): ResolvedProfile {
-  if (!config.activeProfile) {
-    throw new Error("Active profile is required");
-  }
-
-  const profile = config.profiles[config.activeProfile];
-  if (!profile) {
-    throw new Error(`Active profile not found: ${config.activeProfile}`);
-  }
-
+export async function resolveProfile(
+  profile: ManagedNetworkProfile | PrivateNetworkProfile,
+  dependencies: ProfileResolverDependencies = {}
+): Promise<ResolvedProfile> {
   if (profile.mode === "managed") {
+    if (!dependencies.fetchJoinManifest) {
+      throw new Error("Managed profiles require join manifest resolution");
+    }
+
+    const manifest = await dependencies.fetchJoinManifest(profile.join_url);
+
     return {
-      name: config.activeProfile,
-      mode: "managed",
-      join_url: profile.join_url
+      ...profile,
+      network_id: manifest.network_id,
+      directory_url: manifest.directory_url,
+      substrate_url: manifest.substrate_url
     };
   }
 
   const baseUrl = profile.base_url.replace(/\/+$/, "");
+  const substrateBase = baseUrl.replace(/^http/i, "ws");
 
   return {
     ...profile,
-    name: config.activeProfile,
-    base_url: baseUrl,
     directory_url: `${baseUrl}/directory`,
-    substrate_url: `${baseUrl}/substrate`
+    substrate_url: `${substrateBase}/substrate`
   };
 }
