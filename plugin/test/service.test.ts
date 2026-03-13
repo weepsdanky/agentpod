@@ -7,6 +7,40 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createBackgroundService } from "../service/background";
 import type { CapabilityManifest, TaskRequest } from "../types/agentpod";
+import type { AgentPodClient } from "../client";
+
+function createClientStub(
+  overrides: Partial<Pick<
+    AgentPodClient,
+    | "publishManifest"
+    | "listPeers"
+    | "delegate"
+    | "subscribeTask"
+    | "claimInboundTask"
+    | "publishTaskEvent"
+  >> = {}
+): Pick<
+  AgentPodClient,
+  | "publishManifest"
+  | "listPeers"
+  | "delegate"
+  | "subscribeTask"
+  | "claimInboundTask"
+  | "publishTaskEvent"
+> {
+  return {
+    publishManifest: vi.fn(async () => undefined),
+    listPeers: vi.fn(async () => []),
+    delegate: vi.fn(async () => ({
+      task_id: "unused",
+      status: "queued"
+    })),
+    subscribeTask: vi.fn(async () => () => undefined),
+    claimInboundTask: vi.fn(async () => null),
+    publishTaskEvent: vi.fn(async () => undefined),
+    ...overrides
+  };
+}
 
 describe("AgentPod background service", () => {
   let tempDir: string;
@@ -132,12 +166,12 @@ describe("AgentPod background service", () => {
     const subscribeTask = vi.fn(async () => () => undefined);
     const service = createBackgroundService({
       statePath: join(tempDir, "state.json"),
-      client: {
+      client: createClientStub({
         publishManifest,
         listPeers,
         delegate,
         subscribeTask
-      }
+      })
     });
     const manifest: CapabilityManifest = {
       version: "0.1",
@@ -549,7 +583,7 @@ Helps with product brainstorming.
     const service = createBackgroundService({
       statePath: join(tempDir, "state.json"),
       agentpodDocPath: sourcePath,
-      client: {
+      client: createClientStub({
         publishManifest,
         listPeers,
         delegate: vi.fn(async () => ({
@@ -557,14 +591,18 @@ Helps with product brainstorming.
           status: "queued"
         })),
         subscribeTask: vi.fn(async () => () => undefined)
-      }
+      })
     });
 
     const result = await service.publishFromSource();
 
     expect(publishManifest).toHaveBeenCalledOnce();
-    const publishedManifest = publishManifest.mock.calls[0]?.[0];
-    expect(publishedManifest).toEqual(
+    const manifest = ((publishManifest.mock.calls as unknown) as Array<[CapabilityManifest]>)[0]?.[0];
+    expect(manifest).toBeDefined();
+    if (!manifest) {
+      throw new Error("Expected a published manifest");
+    }
+    expect(manifest).toEqual(
       expect.objectContaining({
         version: "0.1",
         peer_id: expect.stringMatching(/^peer_/),
@@ -576,21 +614,21 @@ Helps with product brainstorming.
         ]
       })
     );
-    expect(publishedManifest.signature).not.toMatch(/^local:/);
+    expect(manifest.signature).not.toMatch(/^local:/);
     expect(
       verify(
         null,
         Buffer.from(
           JSON.stringify({
-            version: publishedManifest.version,
-            peer_id: publishedManifest.peer_id,
-            issued_at: publishedManifest.issued_at,
-            expires_at: publishedManifest.expires_at,
-            services: publishedManifest.services
+            version: manifest.version,
+            peer_id: manifest.peer_id,
+            issued_at: manifest.issued_at,
+            expires_at: manifest.expires_at,
+            services: manifest.services
           })
         ),
         service.snapshot().identity.public_key,
-        Buffer.from(publishedManifest.signature, "base64")
+        Buffer.from(manifest.signature, "base64")
       )
     ).toBe(true);
     expect(result).toEqual({
@@ -611,7 +649,7 @@ Helps with product brainstorming.
     const service = createBackgroundService({
       statePath: join(tempDir, "state.json"),
       agentpodDocPath: sourcePath,
-      client: {
+      client: createClientStub({
         publishManifest,
         listPeers: vi.fn(async () => []),
         delegate: vi.fn(async () => ({
@@ -619,7 +657,7 @@ Helps with product brainstorming.
           status: "queued"
         })),
         subscribeTask: vi.fn(async () => () => undefined)
-      }
+      })
     });
 
     await expect(service.publishFromSource()).rejects.toThrow(/missing required section/i);
