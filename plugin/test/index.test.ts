@@ -150,7 +150,7 @@ describe("AgentPod plugin entrypoint", () => {
       registerTool: vi.fn()
     } as any);
 
-    const subcommands = command.command.mock.calls
+    const subcommands = (command.command.mock.calls as unknown[][])
       .map((call) => call[0])
       .filter((value): value is string => typeof value === "string");
     expect(subcommands).toEqual(expect.arrayContaining(["join", "publish", "peers", "tasks", "leave"]));
