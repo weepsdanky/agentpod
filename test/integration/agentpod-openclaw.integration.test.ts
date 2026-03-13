@@ -13,16 +13,20 @@ import type {
   TaskResult,
   TaskUpdate
 } from "../../plugin/types/agentpod";
+import { startHubServer, type RunningHubServer } from "../../hub/index";
 import { createFakeAgentPodTransport } from "./fixtures/fake-substrate-server";
 
 describe("AgentPod integration", () => {
   let tempDir: string;
+  let server: RunningHubServer | null = null;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "agentpod-integration-"));
   });
 
   afterEach(async () => {
+    await server?.close();
+    server = null;
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -154,5 +158,99 @@ describe("AgentPod integration", () => {
       directory_url: "https://agentpod.internal.example.com/directory",
       substrate_url: "wss://agentpod.internal.example.com/substrate"
     });
+  });
+
+  it("runs the same join -> publish -> delegate flow through the real HTTP hub transport", async () => {
+    const peer: PeerProfile = {
+      peer_id: "peer_remote",
+      network_id: "team-a",
+      display_name: "Remote Peer",
+      owner_label: "remote-lab",
+      public_key: "base64...",
+      key_fingerprint: "sha256:remote...",
+      trust_signals: ["operator_verified"],
+      last_seen_at: "2026-03-12T10:54:00Z"
+    };
+
+    server = await startHubServer({
+      bindHost: "127.0.0.1",
+      port: 0,
+      mode: "private",
+      networkId: "team-a",
+      directoryUrl: "http://127.0.0.1/directory",
+      substrateUrl: "ws://127.0.0.1/substrate",
+      operatorKeyId: "operator-key-2026-03",
+      issuer: "team-a-operator",
+      manifestSignature: "manifest-signature",
+      operatorToken: "operator-secret",
+      discoveryRecords: [],
+      peerProfiles: [peer]
+    });
+
+    const { createHttpAgentPodTransport } = await import("../../plugin/client");
+    const client = createAgentPodClient(
+      createHttpAgentPodTransport({
+        baseUrl: server.baseUrl
+      })
+    );
+    const service = createBackgroundService({
+      statePath: join(tempDir, "http-state.json"),
+      client
+    });
+
+    const manifest: CapabilityManifest = {
+      version: "0.1",
+      peer_id: "peer_local",
+      issued_at: "2026-03-12T10:40:00Z",
+      expires_at: "2026-04-12T10:40:00Z",
+      signature: "base64...",
+      services: [
+        {
+          id: "draft_review",
+          summary: "Review drafts.",
+          io: {
+            payload_types: ["text/plain"],
+            attachment_types: [],
+            result_types: ["text/markdown"]
+          }
+        }
+      ]
+    };
+
+    const task: TaskRequest = {
+      version: "0.1",
+      task_id: "task_http_integration_123",
+      service: "draft_review",
+      input: {
+        payload: { text: "Review this plan" },
+        attachments: []
+      },
+      delivery: {
+        reply: "origin_session",
+        artifacts: "inline_only"
+      }
+    };
+
+    await service.start("team-a", {
+      mode: "private",
+      network_id: "team-a",
+      base_url: server.baseUrl
+    });
+
+    const events: Array<TaskUpdate | TaskResult> = [];
+    const unsubscribe = await service.subscribeTask(task.task_id, (event) => {
+      events.push(event);
+    });
+    const peers = await service.publishManifest(manifest);
+    const handle = await service.delegateTask(task);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await unsubscribe();
+
+    expect(peers).toEqual([peer]);
+    expect(handle).toEqual({
+      task_id: "task_http_integration_123",
+      status: "queued"
+    });
+    expect(events).toHaveLength(2);
   });
 });

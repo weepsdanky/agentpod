@@ -40,6 +40,11 @@ export interface AgentPodClient {
   ): Promise<() => void>;
 }
 
+interface HttpAgentPodTransportOptions {
+  baseUrl: string;
+  fetchImpl?: typeof fetch;
+}
+
 export function createAgentPodClient(transport: AgentPodTransport): AgentPodClient {
   return {
     async publishManifest(manifest) {
@@ -73,4 +78,87 @@ export function createAgentPodClient(transport: AgentPodTransport): AgentPodClie
       });
     }
   };
+}
+
+export function createHttpAgentPodTransport(
+  options: HttpAgentPodTransportOptions
+): AgentPodTransport {
+  const baseUrl = options.baseUrl.replace(/\/+$/, "");
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  return {
+    async request(request) {
+      const response = await fetchImpl(`${baseUrl}${request.path}`, {
+        method: request.method,
+        headers: {
+          "content-type": "application/json"
+        },
+        body: request.body ? JSON.stringify(request.body) : undefined
+      });
+      const body = (await response.json()) as unknown;
+
+      if (!response.ok) {
+        throw new Error(`AgentPod request failed: ${response.status}`);
+      }
+
+      return body;
+    },
+
+    async subscribe(path, onEvent) {
+      const abortController = new AbortController();
+      const response = await fetchImpl(`${baseUrl}${path}`, {
+        method: "GET",
+        headers: {
+          accept: "text/event-stream"
+        },
+        signal: abortController.signal
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(`AgentPod subscription failed: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const pump = readEventStream(reader, onEvent);
+
+      return async () => {
+        abortController.abort();
+        try {
+          await pump;
+        } catch (error) {
+          if (!(error instanceof Error) || error.name !== "AbortError") {
+            throw error;
+          }
+        }
+      };
+    }
+  };
+}
+
+async function readEventStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onEvent: (event: AgentPodTransportEvent) => void
+) {
+  let buffer = "";
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      return;
+    }
+
+    buffer += new TextDecoder().decode(chunk.value, { stream: true });
+    let separatorIndex = buffer.indexOf("\n\n");
+    while (separatorIndex >= 0) {
+      const block = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      const line = block
+        .split("\n")
+        .find((candidate) => candidate.startsWith("data: "));
+      if (line) {
+        onEvent(JSON.parse(line.slice("data: ".length)) as AgentPodTransportEvent);
+      }
+      separatorIndex = buffer.indexOf("\n\n");
+    }
+  }
 }

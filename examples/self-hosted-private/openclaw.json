@@ -1,0 +1,21 @@
+{
+  "plugins": {
+    "entries": {
+      "agentpod": {
+        "enabled": true,
+        "config": {
+          "statePath": ".openclaw/agentpod-state.json",
+          "hubBaseUrl": "http://127.0.0.1:4590",
+          "autoJoinProfile": "team-a",
+          "profiles": {
+            "team-a": {
+              "mode": "private",
+              "network_id": "team-a",
+              "base_url": "http://127.0.0.1:4590"
+            }
+          }
+        }
+      }
+    }
+  }
+}

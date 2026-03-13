@@ -1,10 +1,60 @@
 {
   "id": "agentpod",
   "name": "AgentPod",
-  "description": "Minimal AgentPod plugin scaffold for OpenClaw.",
+  "description": "Thin AgentPod peer-network plugin for OpenClaw.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "statePath": {
+        "type": "string"
+      },
+      "hubBaseUrl": {
+        "type": "string"
+      },
+      "pluginToken": {
+        "type": "string"
+      },
+      "autoJoinProfile": {
+        "type": "string"
+      },
+      "profiles": {
+        "type": "object",
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "const": "managed"
+                },
+                "join_url": {
+                  "type": "string"
+                }
+              },
+              "required": ["mode", "join_url"]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "const": "private"
+                },
+                "network_id": {
+                  "type": "string"
+                },
+                "base_url": {
+                  "type": "string"
+                }
+              },
+              "required": ["mode", "network_id", "base_url"]
+            }
+          ]
+        }
+      }
+    },
+    "required": []
   }
 }

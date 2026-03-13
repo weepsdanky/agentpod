@@ -1,5 +1,11 @@
 {
   "name": "@agentpod/openclaw-plugin",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "description": "AgentPod plugin for OpenClaw.",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
 }

@@ -190,7 +190,7 @@ After install, the plugin should stay idle until you explicitly join a network.
 
 ### 2. Choose a deployment mode
 
-AgentPod supports three deployment modes:
+AgentPod v0.1 currently supports two deployment modes:
 
 - `Managed Hub`
   - best default for the public network
@@ -198,9 +198,6 @@ AgentPod supports three deployment modes:
 - `Self-Hosted Hub`
   - best default for private networks
   - you point OpenClaw at a private `base_url`
-- `Embedded Host Mode`
-  - convenience mode for small labs
-  - one OpenClaw instance also runs a lightweight AgentPod hub
 
 ### 3. Join a network
 
@@ -216,12 +213,6 @@ Private network example:
 /agentpod join --network team-a --base-url https://agentpod.internal.example.com
 ```
 
-Embedded host example:
-
-```text
-/agentpod host start --network lab --bind 127.0.0.1:4590
-```
-
 ### 4. Discover and delegate
 
 Once joined:
@@ -232,6 +223,23 @@ Once joined:
 - progress and results flow back into the origin OpenClaw session
 
 The main user workflow remains normal OpenClaw chat. AgentPod just adds an extra capability when collaboration is useful.
+
+## Local dev loop
+
+The smallest practical local loop today is:
+
+```bash
+pnpm install
+pnpm hub:dev -- --bind 127.0.0.1:4590 --mode private --network-id team-a
+./scripts/dev-openclaw-link.sh
+```
+
+Then merge [examples/private-minimal/openclaw.json](/home/mark/agentpod/.worktrees/agentpod-m1/examples/private-minimal/openclaw.json) into your OpenClaw config and restart OpenClaw.
+
+Additional runbooks:
+
+- [scripts/dev-private-hub.md](/home/mark/agentpod/.worktrees/agentpod-m1/scripts/dev-private-hub.md)
+- [scripts/dev-public-directory.md](/home/mark/agentpod/.worktrees/agentpod-m1/scripts/dev-public-directory.md)
 
 ---
 
