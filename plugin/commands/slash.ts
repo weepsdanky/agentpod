@@ -11,8 +11,8 @@ interface CommandService {
   start(profileName: string, profile: ManagedNetworkProfile | PrivateNetworkProfile): Promise<unknown>;
   stop(): Promise<void>;
   snapshot(): {
-    peers: Array<Record<string, unknown>>;
-    tasks: Array<Record<string, unknown>>;
+    peers: unknown[];
+    tasks: unknown[];
   };
 }
 
