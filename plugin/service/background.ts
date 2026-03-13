@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import type { AgentPodClient, DelegationHandle } from "../client";
 import type { ManagedNetworkProfile, PeerProfile, PrivateNetworkProfile } from "../types/agentpod";
@@ -56,7 +56,7 @@ export function createBackgroundService(options: BackgroundServiceOptions) {
   const identity = loadOrCreateLocalPeerIdentity(
     options.identityPath ?? join(dirname(options.statePath), "agentpod-identity.json")
   );
-  const agentpodDocPath = options.agentpodDocPath ?? "AGENTPOD.md";
+  const agentpodDocPath = resolveAgentPodDocPath(options.agentpodDocPath, options.statePath);
 
   let running = false;
   let loaded = false;
@@ -99,17 +99,26 @@ export function createBackgroundService(options: BackgroundServiceOptions) {
     }
 
     mailboxLoop = (async () => {
+      let consecutiveFailures = 0;
       try {
         while (running) {
           let processed = false;
           try {
             processed = await processMailboxOnce();
+            consecutiveFailures = 0;
           } catch (error) {
+            consecutiveFailures += 1;
+            const delayMs = Math.min(
+              (options.pollIntervalMs ?? 1_000) * 2 ** Math.min(consecutiveFailures - 1, 5),
+              30_000
+            );
             console.warn(
               "[agentpod] mailbox polling failed",
-              error instanceof Error ? error.message : String(error)
+              error instanceof Error ? error.message : String(error),
+              `(retry in ${delayMs}ms)`
             );
-            processed = false;
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            continue;
           }
           if (processed) {
             continue;
@@ -330,4 +339,13 @@ export function createBackgroundService(options: BackgroundServiceOptions) {
   };
 
   return service;
+}
+
+function resolveAgentPodDocPath(agentpodDocPath: string | undefined, statePath: string) {
+  const configuredPath = agentpodDocPath ?? "AGENTPOD.md";
+  if (isAbsolute(configuredPath)) {
+    return configuredPath;
+  }
+
+  return resolve(dirname(statePath), configuredPath);
 }

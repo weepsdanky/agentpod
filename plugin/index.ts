@@ -512,6 +512,27 @@ function registerAgentPodCli(program: CliProgramLike, cli: ReturnType<typeof cre
     .action(async () => {
       process.stdout.write(`${JSON.stringify(await cli.publish(), null, 2)}\n`);
     });
+
+  agentpod
+    .command("peers")
+    .description("List cached AgentPod peers")
+    .action(async () => {
+      process.stdout.write(`${JSON.stringify(await cli.peers(), null, 2)}\n`);
+    });
+
+  agentpod
+    .command("tasks")
+    .description("List tracked AgentPod tasks")
+    .action(async () => {
+      process.stdout.write(`${JSON.stringify(await cli.tasks(), null, 2)}\n`);
+    });
+
+  agentpod
+    .command("leave")
+    .description("Leave the active AgentPod network")
+    .action(async () => {
+      process.stdout.write(`${JSON.stringify(await cli.leave(), null, 2)}\n`);
+    });
 }
 
 function buildInboundRunner({
@@ -565,20 +586,22 @@ async function runSlashFromArgs(
   const [command = "status", ...rest] = args.trim().split(/\s+/).filter(Boolean);
 
   if (command === "join") {
-    const [profileName = "default", profileKind, profileValue] = rest;
+    const [profileName = "default", ...joinArgs] = rest;
+    const options = parseFlagArgs(joinArgs);
 
-    if (profileKind === "--join-url" && profileValue) {
+    if (typeof options["join-url"] === "string") {
       return slash.join({
         profileName,
-        joinUrl: profileValue
+        joinUrl: options["join-url"]
       });
     }
 
-    if (profileKind === "--base-url" && profileValue) {
+    if (typeof options["base-url"] === "string") {
       return slash.join({
         profileName,
-        networkId: profileName,
-        baseUrl: profileValue
+        networkId:
+          typeof options["network-id"] === "string" ? options["network-id"] : profileName,
+        baseUrl: options["base-url"]
       });
     }
 
@@ -605,6 +628,29 @@ async function runSlashFromArgs(
     peers: await slash.peers(),
     tasks: await slash.tasks()
   };
+}
+
+function parseFlagArgs(args: string[]) {
+  const options: Record<string, string> = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (!token?.startsWith("--")) {
+      continue;
+    }
+
+    const key = token.slice(2);
+    const value = args[index + 1];
+    if (value && !value.startsWith("--")) {
+      options[key] = value;
+      index += 1;
+      continue;
+    }
+
+    options[key] = "true";
+  }
+
+  return options;
 }
 
 export default agentpodPlugin;

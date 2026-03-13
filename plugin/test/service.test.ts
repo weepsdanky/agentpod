@@ -1,5 +1,5 @@
 import { verify } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -638,6 +638,50 @@ Helps with product brainstorming.
       peer_count: 1
     });
     await expect(readFile(sourcePath, "utf8")).resolves.toContain("# Summary");
+  });
+
+  it("resolves a relative AGENTPOD.md path from the state file directory", async () => {
+    const publishManifest = vi.fn(async () => undefined);
+    const listPeers = vi.fn(async () => []);
+    const nestedDir = join(tempDir, "nested");
+    const statePath = join(nestedDir, "state.json");
+    const sourcePath = join(nestedDir, "AGENTPOD.md");
+
+    await mkdir(nestedDir, { recursive: true });
+    await writeFile(
+      sourcePath,
+      `# Summary
+
+Helps with product brainstorming.
+
+# Services
+
+## product_brainstorm
+- summary: Structure early product ideas.
+- when to use: Use when exploring a draft MVP.
+
+# Inputs
+- accepted payload types: \`text/plain\`
+- accepted attachment types: \`application/pdf\`
+
+# Outputs
+- result types: \`text/markdown\`
+- artifact behavior: inline summary by default
+
+# Safety
+- notable limits: Does not perform irreversible external actions.
+`,
+      "utf8"
+    );
+
+    const service = createBackgroundService({
+      statePath,
+      agentpodDocPath: "AGENTPOD.md",
+      client: createClientStub({ publishManifest, listPeers })
+    });
+
+    await expect(service.publishFromSource()).resolves.toMatchObject({ ok: true, service_count: 1 });
+    expect(publishManifest).toHaveBeenCalledOnce();
   });
 
   it("blocks publication when AGENTPOD.md is invalid", async () => {

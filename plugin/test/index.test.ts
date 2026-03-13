@@ -92,6 +92,68 @@ describe("AgentPod plugin entrypoint", () => {
     );
   });
 
+  it("routes text args through the fallback agentpod command", async () => {
+    const registerCommand = vi.fn();
+
+    await agentpodPlugin.register?.({
+      pluginConfig: {
+        statePath: "/tmp/agentpod-state.json",
+        hubBaseUrl: "http://127.0.0.1:4590"
+      },
+      registerService: vi.fn(),
+      registerCli: vi.fn(),
+      registerCommand,
+      registerGatewayMethod: vi.fn(),
+      registerTool: vi.fn()
+    } as any);
+
+    const commandDef = registerCommand.mock.calls.find((call) => call[0]?.name === "agentpod")?.[0];
+    expect(commandDef).toBeTruthy();
+
+    const peersResult = await commandDef.handler({ args: "peers" });
+    expect(() => JSON.parse(peersResult.text)).not.toThrow();
+
+    const joinResult = await commandDef.handler({
+      args: "join team-a --base-url http://127.0.0.1:4590 --network-id team-a"
+    });
+    expect(JSON.parse(joinResult.text)).toMatchObject({
+      ok: true,
+      profileName: "team-a",
+      network_id: "team-a"
+    });
+  });
+
+  it("registers real CLI subcommands for peers, tasks, and leave", async () => {
+    const command = {
+      description: vi.fn(() => command),
+      argument: vi.fn(() => command),
+      option: vi.fn(() => command),
+      action: vi.fn(() => command),
+      command: vi.fn(() => command)
+    };
+    const program = {
+      command: vi.fn(() => command)
+    };
+
+    await agentpodPlugin.register?.({
+      pluginConfig: {
+        statePath: "/tmp/agentpod-state.json",
+        hubBaseUrl: "http://127.0.0.1:4590"
+      },
+      registerService: vi.fn(),
+      registerCli: (registrar: ({ program }: any) => void, options?: { commands?: string[] }) => {
+        expect(options?.commands).toEqual(["agentpod"]);
+        registrar({ program });
+      },
+      registerCommand: vi.fn(),
+      registerGatewayMethod: vi.fn(),
+      registerTool: vi.fn()
+    } as any);
+
+    const subcommands = command.command.mock.calls.map((call) => call[0]);
+    expect(subcommands).toEqual(expect.arrayContaining(["join", "publish", "peers", "tasks", "leave"]));
+  });
+
   it("declares openclaw.extensions in plugin package metadata", async () => {
     const packageJson = JSON.parse(
       await readFile(new URL("../package.json", import.meta.url), "utf8")
