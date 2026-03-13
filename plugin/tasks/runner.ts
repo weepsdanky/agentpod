@@ -3,6 +3,7 @@ import type { TaskRegistry } from "./registry";
 
 interface SpawnSessionResult {
   childSessionKey: string;
+  runId?: string;
 }
 
 interface ExecutionGuard {
@@ -56,7 +57,8 @@ export function createTaskRunner({
 
       return {
         accepted: true as const,
-        childSessionKey: spawned.childSessionKey
+        childSessionKey: spawned.childSessionKey,
+        ...(spawned.runId ? { runId: spawned.runId } : {})
       };
     }
   };

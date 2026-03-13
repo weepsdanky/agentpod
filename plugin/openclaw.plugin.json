@@ -9,10 +9,19 @@
       "statePath": {
         "type": "string"
       },
+      "identityPath": {
+        "type": "string"
+      },
+      "agentpodDocPath": {
+        "type": "string"
+      },
       "hubBaseUrl": {
         "type": "string"
       },
       "pluginToken": {
+        "type": "string"
+      },
+      "runtimeSessionKey": {
         "type": "string"
       },
       "autoJoinProfile": {

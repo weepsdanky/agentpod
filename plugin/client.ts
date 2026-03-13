@@ -34,6 +34,8 @@ export interface AgentPodClient {
   publishManifest(manifest: CapabilityManifest): Promise<void>;
   listPeers(): Promise<PeerProfile[]>;
   delegate(task: TaskRequest): Promise<DelegationHandle>;
+  claimInboundTask(peerId: string): Promise<TaskRequest | null>;
+  publishTaskEvent(taskId: string, event: TaskUpdate | TaskResult): Promise<void>;
   subscribeTask(
     taskId: string,
     onEvent: (event: TaskUpdate | TaskResult) => void
@@ -70,6 +72,33 @@ export function createAgentPodClient(transport: AgentPodTransport): AgentPodClie
         path: "/v1/tasks/delegate",
         body: { task }
       })) as DelegationHandle;
+    },
+
+    async claimInboundTask(peerId) {
+      const response = (await transport.request({
+        method: "POST",
+        path: "/v1/runtime/mailbox/claim",
+        body: {
+          peer_id: peerId
+        }
+      })) as { task?: TaskRequest | null };
+
+      return response.task ?? null;
+    },
+
+    async publishTaskEvent(taskId, event) {
+      const kind = "status" in event ? "result" : "update";
+      await transport.request({
+        method: "POST",
+        path: "/v1/runtime/tasks/event",
+        body: {
+          task_id: taskId,
+          event: {
+            kind,
+            data: event
+          }
+        }
+      });
     },
 
     async subscribeTask(taskId, onEvent) {

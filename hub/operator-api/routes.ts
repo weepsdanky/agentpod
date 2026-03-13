@@ -5,6 +5,7 @@ import { createTokenStore, type JoinExchangeRequest } from "../join/token-issuer
 import { renewToken, type TokenRenewRequest } from "../join/token-renew";
 import { createInMemoryDiscoveryWiring, type DiscoveryRecord } from "../openagents/wiring";
 import { projectPublicCards } from "../projection/public-card";
+import { createMailboxStore } from "../state/mailbox-store";
 import type { CapabilityManifest, TaskRequest, TaskResult, TaskUpdate } from "../../plugin/types/agentpod";
 
 type HttpMethod = "GET" | "POST";
@@ -21,9 +22,21 @@ interface RouterResponse {
   body: Record<string, unknown>;
 }
 
+interface TaskStreamEvent {
+  kind: "update" | "result";
+  data: TaskUpdate | TaskResult;
+}
+
+interface TaskDeliveryContext {
+  task: TaskRequest;
+  publish(event: TaskStreamEvent): void;
+}
+
 interface HubRouterConfig extends HubConfig {
   discoveryRecords: DiscoveryRecord[];
   peerProfiles?: unknown[];
+  deliverTask?: (input: TaskDeliveryContext) => Promise<void> | void;
+  mailboxStatePath?: string;
 }
 
 export function createHubRouter(config: HubRouterConfig) {
@@ -32,7 +45,14 @@ export function createHubRouter(config: HubRouterConfig) {
   const discovery = createInMemoryDiscoveryWiring(config.discoveryRecords);
   const publishedCapabilityManifests: CapabilityManifest[] = [];
   const peerProfiles = [...(config.peerProfiles ?? [])];
-  const taskSubscribers = new Map<string, Array<(event: { kind: "update" | "result"; data: TaskUpdate | TaskResult }) => void>>();
+  const taskSubscribers = new Map<string, Array<(event: TaskStreamEvent) => void>>();
+  const mailboxStore = createMailboxStore(config.mailboxStatePath);
+
+  function publishTaskEvent(taskId: string, event: TaskStreamEvent) {
+    for (const subscriber of taskSubscribers.get(taskId) ?? []) {
+      subscriber(event);
+    }
+  }
 
   return {
     async handle(request: RouterRequest): Promise<RouterResponse> {
@@ -127,30 +147,39 @@ export function createHubRouter(config: HubRouterConfig) {
 
       if (request.method === "POST" && request.path === "/v1/tasks/delegate") {
         const task = request.body?.task as TaskRequest;
-        const update: TaskUpdate = {
-          version: "0.1",
-          task_id: task.task_id,
-          state: "running",
-          message: "Remote peer is working",
-          progress: 0.5,
-          timestamp: "2026-03-12T10:45:00Z"
-        };
-        const result: TaskResult = {
-          version: "0.1",
-          task_id: task.task_id,
-          status: "completed",
-          output: {
-            text: "Here is a first-pass MVP structure."
-          },
-          artifacts: [],
-          execution_summary: {
-            used_tools: ["read_file"],
-            used_network: false
-          }
-        };
-        for (const subscriber of taskSubscribers.get(task.task_id) ?? []) {
-          subscriber({ kind: "update", data: update });
-          subscriber({ kind: "result", data: result });
+        if (config.deliverTask) {
+          await config.deliverTask({
+            task,
+            publish(event) {
+              publishTaskEvent(task.task_id, event);
+            }
+          });
+        } else if (task.target_peer_id) {
+          await mailboxStore.enqueue(task.target_peer_id, task);
+        } else {
+          const update: TaskUpdate = {
+            version: "0.1",
+            task_id: task.task_id,
+            state: "running",
+            message: "Remote peer is working",
+            progress: 0.5,
+            timestamp: "2026-03-12T10:45:00Z"
+          };
+          const result: TaskResult = {
+            version: "0.1",
+            task_id: task.task_id,
+            status: "completed",
+            output: {
+              text: "Here is a first-pass MVP structure."
+            },
+            artifacts: [],
+            execution_summary: {
+              used_tools: ["read_file"],
+              used_network: false
+            }
+          };
+          publishTaskEvent(task.task_id, { kind: "update", data: update });
+          publishTaskEvent(task.task_id, { kind: "result", data: result });
         }
         return {
           status: 200,
@@ -161,12 +190,45 @@ export function createHubRouter(config: HubRouterConfig) {
         };
       }
 
+      if (request.method === "POST" && request.path === "/v1/runtime/mailbox/claim") {
+        const peerId = String(request.body?.peer_id ?? "");
+        const task = await mailboxStore.claim(peerId);
+
+        return {
+          status: 200,
+          body: {
+            task
+          }
+        };
+      }
+
+      if (request.method === "POST" && request.path === "/v1/runtime/tasks/event") {
+        const taskId = String(request.body?.task_id ?? "");
+        const event = request.body?.event as TaskStreamEvent | undefined;
+        if (taskId && event && (event.kind === "update" || event.kind === "result")) {
+          publishTaskEvent(taskId, event);
+          return {
+            status: 200,
+            body: {
+              ok: true
+            }
+          };
+        }
+
+        return {
+          status: 400,
+          body: {
+            error: "invalid_event"
+          }
+        };
+      }
+
       return { status: 404, body: { error: "not_found" } };
     },
 
     subscribeTask(
       taskId: string,
-      onEvent: (event: { kind: "update" | "result"; data: TaskUpdate | TaskResult }) => void
+      onEvent: (event: TaskStreamEvent) => void
     ) {
       const listeners = taskSubscribers.get(taskId) ?? [];
       listeners.push(onEvent);

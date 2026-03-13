@@ -6,6 +6,7 @@ export function createCliCommands(service: Parameters<typeof createSlashCommands
   return {
     join: slash.join,
     leave: slash.leave,
+    publish: slash.publish,
     peers: slash.peers,
     tasks: slash.tasks
   };

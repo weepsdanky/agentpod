@@ -5,6 +5,7 @@ export function createGatewayMethods(service: Parameters<typeof createSlashComma
 
   return {
     "agentpod.status": async () => service.snapshot(),
+    "agentpod.publish": commands.publish,
     "agentpod.peers.list": commands.peers,
     "agentpod.tasks.list": commands.tasks,
     "agentpod.network.join": commands.join,

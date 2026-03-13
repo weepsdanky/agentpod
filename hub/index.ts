@@ -11,6 +11,8 @@ interface HubServerOptions extends HubConfig {
   port: number;
   discoveryRecords: Parameters<typeof createHubRouter>[0]["discoveryRecords"];
   peerProfiles?: Parameters<typeof createHubRouter>[0]["peerProfiles"];
+  deliverTask?: Parameters<typeof createHubRouter>[0]["deliverTask"];
+  mailboxStatePath?: Parameters<typeof createHubRouter>[0]["mailboxStatePath"];
 }
 
 export interface RunningHubServer {
@@ -181,6 +183,8 @@ export function parseHubCliArgs(argv: string[]): ParsedHubCliArgs {
     issuer: args.get("--issuer") ?? `${networkId}-operator`,
     manifestSignature: args.get("--manifest-signature") ?? "local-dev-signature",
     operatorToken: args.get("--operator-token") ?? "agentpod-local-operator-token",
+    mailboxStatePath:
+      args.get("--mailbox-state-path") ?? ".agentpod-hub/mailbox-state.json",
     discoveryRecords: [],
     peerProfiles: []
   };
@@ -198,6 +202,7 @@ function defaultHubCliArgs(): HubServerOptions {
     issuer: "agentpod-local-operator",
     manifestSignature: "local-dev-signature",
     operatorToken: "agentpod-local-operator-token",
+    mailboxStatePath: ".agentpod-hub/mailbox-state.json",
     discoveryRecords: [],
     peerProfiles: []
   };
@@ -212,6 +217,7 @@ function printHubHelp() {
   process.stdout.write(`  --network-id <id>            Network id (default: agentpod-local)\n`);
   process.stdout.write(`  --base-url <url>             Public base URL used in returned endpoints\n`);
   process.stdout.write(`  --operator-token <token>     Operator token for revoke endpoint\n`);
+  process.stdout.write(`  --mailbox-state-path <path>  JSON file for persisted mailbox state\n`);
   process.stdout.write(`  --help                       Show this help\n`);
 }
 

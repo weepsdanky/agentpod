@@ -203,14 +203,21 @@ function parseOptionalValue(section: string, label: string): string | undefined 
 function parseCsvBullet(section: string, label: string): string[] {
   return parseRequiredValue(section, label)
     .split(",")
-    .map((value) => value.trim())
+    .map((value) => normalizeBulletValue(value))
     .filter(Boolean);
 }
 
 function parseArtifactPolicy(value: string): ArtifactPolicy {
-  if (value === "inline_only" || value === "allow_links") {
-    return value;
+  const normalized = normalizeBulletValue(value);
+
+  if (normalized === "inline_only" || normalized === "allow_links") {
+    return normalized;
   }
+
+  if (normalized === "inline summary by default") {
+    return "inline_only";
+  }
+
   throw new Error(`Unsupported artifact behavior: ${value}`);
 }
 
@@ -230,6 +237,10 @@ function parseToolUsePolicy(value: string): ToolUsePolicy {
 
 function normalizeInlineText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeBulletValue(value: string): string {
+  return value.trim().replace(/^`(.+)`$/, "$1");
 }
 
 function escapeRegExp(value: string): string {

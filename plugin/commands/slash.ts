@@ -10,6 +10,12 @@ interface JoinArgs {
 interface CommandService {
   start(profileName: string, profile: ManagedNetworkProfile | PrivateNetworkProfile): Promise<unknown>;
   stop(): Promise<void>;
+  publishFromSource(): Promise<{
+    ok: true;
+    peer_id: string;
+    service_count: number;
+    peer_count: number;
+  }>;
   snapshot(): {
     peers: unknown[];
     tasks: unknown[];
@@ -32,6 +38,10 @@ export function createSlashCommands(service: CommandService) {
     async leave() {
       await service.stop();
       return { ok: true };
+    },
+
+    async publish() {
+      return service.publishFromSource();
     },
 
     async peers() {

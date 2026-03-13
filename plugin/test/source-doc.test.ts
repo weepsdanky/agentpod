@@ -160,4 +160,64 @@ Shared summary.
       artifact: "allow_links"
     });
   });
+
+  it("accepts the getting-started inline artifact wording", () => {
+    const source = `# Summary
+
+Shared summary.
+
+# Services
+
+## product_brainstorm
+- summary: Brainstorm product directions.
+
+# Inputs
+- accepted payload types: text/plain
+- accepted attachment types: application/pdf
+
+# Outputs
+- result types: text/markdown
+- artifact behavior: inline summary by default
+
+# Safety
+- notable limits: None.
+`;
+
+    const manifest = compileAgentPodSource(source, compileOptions);
+
+    expect(manifest.services[0]?.policy).toMatchObject({
+      artifact: "inline_only"
+    });
+  });
+
+  it("strips markdown code formatting from IO type bullets", () => {
+    const source = `# Summary
+
+Shared summary.
+
+# Services
+
+## product_brainstorm
+- summary: Brainstorm product directions.
+
+# Inputs
+- accepted payload types: \`text/plain\`, \`text/markdown\`
+- accepted attachment types: \`application/pdf\`
+
+# Outputs
+- result types: \`text/markdown\`
+- artifact behavior: inline_only
+
+# Safety
+- notable limits: None.
+`;
+
+    const manifest = compileAgentPodSource(source, compileOptions);
+
+    expect(manifest.services[0]?.io).toEqual({
+      payload_types: ["text/plain", "text/markdown"],
+      attachment_types: ["application/pdf"],
+      result_types: ["text/markdown"]
+    });
+  });
 });

@@ -125,4 +125,58 @@ describe("AgentPod client", () => {
     expect(events[0]).toMatchObject({ task_id: "task_123", state: "running" });
     expect(events[1]).toMatchObject({ task_id: "task_123", status: "completed" });
   });
+
+  it("claims inbound mailbox tasks for a specific peer", async () => {
+    const task: TaskRequest = {
+      version: "0.1",
+      task_id: "task_mailbox_123",
+      target_peer_id: "peer_remote",
+      service: "product_brainstorm",
+      input: {
+        payload: { text: "Help from the mailbox" },
+        attachments: []
+      },
+      delivery: {
+        reply: "origin_session",
+        artifacts: "inline_only"
+      }
+    };
+    const request = vi.fn().mockResolvedValue({ task });
+    const client = createAgentPodClient({ request, subscribe: vi.fn() });
+
+    await expect(client.claimInboundTask("peer_remote")).resolves.toEqual(task);
+    expect(request).toHaveBeenCalledWith({
+      method: "POST",
+      path: "/v1/runtime/mailbox/claim",
+      body: {
+        peer_id: "peer_remote"
+      }
+    });
+  });
+
+  it("publishes runtime task events back to the hub", async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true });
+    const client = createAgentPodClient({ request, subscribe: vi.fn() });
+    const event: TaskUpdate = {
+      version: "0.1",
+      task_id: "task_123",
+      state: "running",
+      message: "Spawned local subagent session",
+      progress: 0.1,
+      timestamp: "2026-03-13T09:00:00Z"
+    };
+
+    await client.publishTaskEvent("task_123", event);
+    expect(request).toHaveBeenCalledWith({
+      method: "POST",
+      path: "/v1/runtime/tasks/event",
+      body: {
+        task_id: "task_123",
+        event: {
+          kind: "update",
+          data: event
+        }
+      }
+    });
+  });
 });

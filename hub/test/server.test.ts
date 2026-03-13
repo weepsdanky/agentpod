@@ -1,14 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHubServer, type RunningHubServer } from "../index";
 import { createHubRouter } from "../operator-api/routes";
 
 describe("AgentPod hub router", () => {
   let server: RunningHubServer | null = null;
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "agentpod-hub-"));
+  });
 
   afterEach(async () => {
     await server?.close();
     server = null;
+    await rm(tempDir, { recursive: true, force: true });
   });
 
   it("returns signed managed join manifest metadata", async () => {
@@ -399,6 +409,271 @@ describe("AgentPod hub router", () => {
     expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({ kind: "update" });
     expect(events[1]).toMatchObject({ kind: "result" });
+  });
+
+  it("routes delegated work through an injected delivery handler instead of fabricating completion", async () => {
+    const deliverTask = vi.fn(async ({ task, publish }) => {
+      publish({
+        kind: "update",
+        data: {
+          version: "0.1",
+          task_id: task.task_id,
+          state: "running",
+          message: "Spawned local subagent session",
+          progress: 0.1,
+          timestamp: "2026-03-13T09:00:00Z"
+        }
+      });
+    });
+    const router = createHubRouter({
+      mode: "managed",
+      networkId: "agentpod-public",
+      directoryUrl: "https://agentpod.ai/directory",
+      substrateUrl: "wss://agentpod.ai/substrate",
+      operatorKeyId: "operator-key-2026-03",
+      issuer: "agentpod-public-operator",
+      manifestSignature: "manifest-signature",
+      operatorToken: "operator-secret",
+      discoveryRecords: [],
+      deliverTask
+    } as any);
+    const events: Array<{ kind: string; data: unknown }> = [];
+
+    router.subscribeTask("task_runtime_123", (event) => {
+      events.push(event);
+    });
+
+    const response = await router.handle({
+      method: "POST",
+      path: "/v1/tasks/delegate",
+      body: {
+        task: {
+          version: "0.1",
+          task_id: "task_runtime_123",
+          service: "product_brainstorm",
+          input: {
+            payload: { text: "Use a real subagent" },
+            attachments: []
+          },
+          delivery: {
+            reply: "origin_session",
+            artifacts: "inline_only"
+          }
+        }
+      }
+    });
+
+    expect(response).toMatchObject({
+      status: 200,
+      body: {
+        task_id: "task_runtime_123",
+        status: "queued"
+      }
+    });
+    expect(deliverTask).toHaveBeenCalledOnce();
+    expect(events).toEqual([
+      {
+        kind: "update",
+        data: {
+          version: "0.1",
+          task_id: "task_runtime_123",
+          state: "running",
+          message: "Spawned local subagent session",
+          progress: 0.1,
+          timestamp: "2026-03-13T09:00:00Z"
+        }
+      }
+    ]);
+  });
+
+  it("queues targeted tasks in a peer mailbox and relays runtime events", async () => {
+    const router = createHubRouter({
+      mode: "managed",
+      networkId: "agentpod-public",
+      directoryUrl: "https://agentpod.ai/directory",
+      substrateUrl: "wss://agentpod.ai/substrate",
+      operatorKeyId: "operator-key-2026-03",
+      issuer: "agentpod-public-operator",
+      manifestSignature: "manifest-signature",
+      operatorToken: "operator-secret",
+      discoveryRecords: []
+    });
+    const events: Array<{ kind: string; data: unknown }> = [];
+
+    router.subscribeTask("task_mailbox_123", (event) => {
+      events.push(event);
+    });
+
+    await expect(
+      router.handle({
+        method: "POST",
+        path: "/v1/tasks/delegate",
+        body: {
+          task: {
+            version: "0.1",
+            task_id: "task_mailbox_123",
+            target_peer_id: "peer_remote",
+            service: "product_brainstorm",
+            input: {
+              payload: { text: "Queue this for the remote peer" },
+              attachments: []
+            },
+            delivery: {
+              reply: "origin_session",
+              artifacts: "inline_only"
+            }
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      status: 200,
+      body: {
+        task_id: "task_mailbox_123",
+        status: "queued"
+      }
+    });
+
+    await expect(
+      router.handle({
+        method: "POST",
+        path: "/v1/runtime/mailbox/claim",
+        body: {
+          peer_id: "peer_remote"
+        }
+      })
+    ).resolves.toMatchObject({
+      status: 200,
+      body: {
+        task: expect.objectContaining({
+          task_id: "task_mailbox_123",
+          target_peer_id: "peer_remote"
+        })
+      }
+    });
+
+    await expect(
+      router.handle({
+        method: "POST",
+        path: "/v1/runtime/mailbox/claim",
+        body: {
+          peer_id: "peer_remote"
+        }
+      })
+    ).resolves.toEqual({
+      status: 200,
+      body: {
+        task: null
+      }
+    });
+
+    await router.handle({
+      method: "POST",
+      path: "/v1/runtime/tasks/event",
+      body: {
+        task_id: "task_mailbox_123",
+        event: {
+          kind: "update",
+          data: {
+            version: "0.1",
+            task_id: "task_mailbox_123",
+            state: "running",
+            message: "Remote peer claimed the task",
+            progress: 0.2,
+            timestamp: "2026-03-13T09:30:00Z"
+          }
+        }
+      }
+    });
+
+    expect(events).toEqual([
+      {
+        kind: "update",
+        data: {
+          version: "0.1",
+          task_id: "task_mailbox_123",
+          state: "running",
+          message: "Remote peer claimed the task",
+          progress: 0.2,
+          timestamp: "2026-03-13T09:30:00Z"
+        }
+      }
+    ]);
+  });
+
+  it("persists queued mailbox tasks across router restarts", async () => {
+    const mailboxStatePath = join(tempDir, "mailbox.json");
+    const firstRouter = createHubRouter({
+      mode: "managed",
+      networkId: "agentpod-public",
+      directoryUrl: "https://agentpod.ai/directory",
+      substrateUrl: "wss://agentpod.ai/substrate",
+      operatorKeyId: "operator-key-2026-03",
+      issuer: "agentpod-public-operator",
+      manifestSignature: "manifest-signature",
+      operatorToken: "operator-secret",
+      discoveryRecords: [],
+      mailboxStatePath
+    } as any);
+
+    await expect(
+      firstRouter.handle({
+        method: "POST",
+        path: "/v1/tasks/delegate",
+        body: {
+          task: {
+            version: "0.1",
+            task_id: "task_mailbox_persist_123",
+            target_peer_id: "peer_remote",
+            service: "product_brainstorm",
+            input: {
+              payload: { text: "Persist this queued task" },
+              attachments: []
+            },
+            delivery: {
+              reply: "origin_session",
+              artifacts: "inline_only"
+            }
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      status: 200,
+      body: {
+        task_id: "task_mailbox_persist_123",
+        status: "queued"
+      }
+    });
+
+    const restartedRouter = createHubRouter({
+      mode: "managed",
+      networkId: "agentpod-public",
+      directoryUrl: "https://agentpod.ai/directory",
+      substrateUrl: "wss://agentpod.ai/substrate",
+      operatorKeyId: "operator-key-2026-03",
+      issuer: "agentpod-public-operator",
+      manifestSignature: "manifest-signature",
+      operatorToken: "operator-secret",
+      discoveryRecords: [],
+      mailboxStatePath
+    } as any);
+
+    await expect(
+      restartedRouter.handle({
+        method: "POST",
+        path: "/v1/runtime/mailbox/claim",
+        body: {
+          peer_id: "peer_remote"
+        }
+      })
+    ).resolves.toMatchObject({
+      status: 200,
+      body: {
+        task: expect.objectContaining({
+          task_id: "task_mailbox_persist_123",
+          target_peer_id: "peer_remote"
+        })
+      }
+    });
   });
 
   it("starts a real HTTP server that serves join manifests and task event streams", async () => {

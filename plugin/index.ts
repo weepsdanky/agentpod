@@ -2,8 +2,12 @@ import { createAgentPodClient, createHttpAgentPodTransport } from "./client";
 import { createCliCommands } from "./commands/cli";
 import { createGatewayMethods } from "./commands/gateway";
 import { createSlashCommands } from "./commands/slash";
+import { createExecutionGuard } from "./policy/guard";
+import { createRuntimeSubagentExecutor } from "./runtime/subagent-executor";
+import { createSubagentTracker } from "./runtime/subagent-tracker";
 import { createBackgroundService } from "./service/background";
 import { createTaskRegistry } from "./tasks/registry";
+import { createTaskRunner } from "./tasks/runner";
 import { createDelegateTool } from "./tools/delegate";
 import { createPeersTool } from "./tools/peers";
 import { createTasksTool } from "./tools/tasks";
@@ -18,10 +22,19 @@ const agentpodPluginConfigSchema = {
     statePath: {
       type: "string"
     },
+    identityPath: {
+      type: "string"
+    },
+    agentpodDocPath: {
+      type: "string"
+    },
     hubBaseUrl: {
       type: "string"
     },
     pluginToken: {
+      type: "string"
+    },
+    runtimeSessionKey: {
       type: "string"
     },
     autoJoinProfile: {
@@ -45,6 +58,8 @@ interface LegacyPluginApi {
 
 interface PluginOptions {
   statePath: string;
+  identityPath?: string;
+  agentpodDocPath?: string;
 }
 
 interface OpenClawLikeApi {
@@ -53,12 +68,43 @@ interface OpenClawLikeApi {
     state?: {
       resolveStateDir?: () => string;
     };
+    subagent?: {
+      run: (params: {
+        sessionKey: string;
+        message: string;
+        extraSystemPrompt?: string;
+        lane?: string;
+        deliver?: boolean;
+        idempotencyKey?: string;
+      }) => Promise<{ runId: string }>;
+      waitForRun?: (params: {
+        runId: string;
+        timeoutMs?: number;
+      }) => Promise<{ status: "ok" | "error" | "timeout"; error?: string }>;
+      getSessionMessages?: (params: {
+        sessionKey: string;
+        limit?: number;
+      }) => Promise<{ messages: unknown[] }>;
+      getSession?: (params: {
+        sessionKey: string;
+        limit?: number;
+      }) => Promise<{ messages: unknown[] }>;
+      deleteSession?: (params: {
+        sessionKey: string;
+        deleteTranscript?: boolean;
+      }) => Promise<void>;
+    };
   };
   registerService(service: {
     id: string;
     start: () => Promise<void>;
     stop: () => Promise<void>;
   }): void;
+  registerHook?(
+    events: string | string[],
+    handler: (...args: any[]) => void | Promise<void>,
+    opts?: Record<string, unknown>
+  ): void;
   registerCli(
     registrar: (ctx: { program: CliProgramLike }) => void,
     opts?: { commands?: string[] }
@@ -107,7 +153,9 @@ type JoinProfile = ManagedNetworkProfile | PrivateNetworkProfile;
 
 export function createAgentPodPlugin(api: LegacyPluginApi, options: PluginOptions) {
   const service = createBackgroundService({
-    statePath: options.statePath
+    statePath: options.statePath,
+    identityPath: options.identityPath,
+    agentpodDocPath: options.agentpodDocPath
   });
   const registry = createTaskRegistry();
   const client = {
@@ -165,11 +213,25 @@ const agentpodPlugin = {
           })
         )
       : undefined;
+    const subagentTracker = createSubagentTracker();
+    const registry = createTaskRegistry();
+    const inboundRunner = api.runtime?.subagent
+      ? buildInboundRunner({
+          runtime: api.runtime.subagent as NonNullable<
+            NonNullable<OpenClawLikeApi["runtime"]>["subagent"]
+          >,
+          tracker: subagentTracker,
+          registry,
+          sessionKey: pluginConfig.runtimeSessionKey
+        })
+      : undefined;
     const service = createBackgroundService({
       statePath: pluginConfig.statePath,
-      client
+      identityPath: pluginConfig.identityPath,
+      agentpodDocPath: pluginConfig.agentpodDocPath,
+      client,
+      inboundRunner
     });
-    const registry = createTaskRegistry();
     const cli = createCliCommands(service);
     const slash = createSlashCommands(service);
     const gateway = createGatewayMethods(service);
@@ -204,6 +266,50 @@ const agentpodPlugin = {
         await service.stop();
       }
     });
+
+    api.registerHook?.("subagent_spawned", async (event) => {
+      if (
+        !event ||
+        typeof event !== "object" ||
+        typeof (event as { runId?: unknown }).runId !== "string" ||
+        typeof (event as { childSessionKey?: unknown }).childSessionKey !== "string"
+      ) {
+        return;
+      }
+
+      subagentTracker.noteSpawned({
+        runId: (event as { runId: string }).runId,
+        childSessionKey: (event as { childSessionKey: string }).childSessionKey
+      });
+    }, { plugin: "agentpod" });
+
+    api.registerHook?.("subagent_ended", async (event) => {
+      if (
+        !event ||
+        typeof event !== "object" ||
+        typeof (event as { targetSessionKey?: unknown }).targetSessionKey !== "string"
+      ) {
+        return;
+      }
+
+      subagentTracker.noteEnded({
+        runId:
+          typeof (event as { runId?: unknown }).runId === "string"
+            ? (event as { runId: string }).runId
+            : undefined,
+        targetSessionKey: (event as { targetSessionKey: string }).targetSessionKey,
+        reason:
+          typeof (event as { reason?: unknown }).reason === "string"
+            ? (event as { reason: string }).reason
+            : "ended",
+        outcome:
+          typeof (event as { outcome?: unknown }).outcome === "string"
+            ? (event as {
+                outcome: "ok" | "error" | "timeout" | "killed" | "reset" | "deleted";
+              }).outcome
+            : undefined
+      });
+    }, { plugin: "agentpod" });
 
     api.registerCli(({ program }) => {
       registerAgentPodCli(program, cli);
@@ -317,10 +423,22 @@ function resolvePluginConfig(
       typeof pluginConfig?.statePath === "string"
         ? pluginConfig.statePath
         : `${fallbackStateDir.replace(/\/+$/, "")}/agentpod-state.json`,
+    identityPath:
+      typeof pluginConfig?.identityPath === "string"
+        ? pluginConfig.identityPath
+        : undefined,
+    agentpodDocPath:
+      typeof pluginConfig?.agentpodDocPath === "string"
+        ? pluginConfig.agentpodDocPath
+        : "AGENTPOD.md",
     hubBaseUrl:
       typeof pluginConfig?.hubBaseUrl === "string" ? pluginConfig.hubBaseUrl : undefined,
     pluginToken:
       typeof pluginConfig?.pluginToken === "string" ? pluginConfig.pluginToken : undefined,
+    runtimeSessionKey:
+      typeof pluginConfig?.runtimeSessionKey === "string"
+        ? pluginConfig.runtimeSessionKey
+        : "main",
     autoJoinProfile:
       typeof pluginConfig?.autoJoinProfile === "string"
         ? pluginConfig.autoJoinProfile
@@ -366,9 +484,11 @@ function readProfiles(value: unknown): Record<string, JoinProfile> {
 }
 
 function registerAgentPodCli(program: CliProgramLike, cli: ReturnType<typeof createCliCommands>) {
-  program
+  const agentpod = program
     .command("agentpod")
-    .description("Manage AgentPod network state")
+    .description("Manage AgentPod network state");
+
+  agentpod
     .command("join")
     .description("Join an AgentPod network")
     .argument("<profileName>", "profile name")
@@ -384,6 +504,57 @@ function registerAgentPodCli(program: CliProgramLike, cli: ReturnType<typeof cre
       });
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     });
+
+  agentpod
+    .command("publish")
+    .description("Publish the compiled AgentPod source document")
+    .action(async () => {
+      process.stdout.write(`${JSON.stringify(await cli.publish(), null, 2)}\n`);
+    });
+}
+
+function buildInboundRunner({
+  runtime,
+  tracker,
+  registry,
+  sessionKey
+}: {
+  runtime: NonNullable<NonNullable<OpenClawLikeApi["runtime"]>["subagent"]>;
+  tracker: ReturnType<typeof createSubagentTracker>;
+  registry: ReturnType<typeof createTaskRegistry>;
+  sessionKey: string;
+}) {
+  const executor = createRuntimeSubagentExecutor({
+    sessionKey,
+    runtime,
+    tracker
+  });
+  const taskRunner = createTaskRunner({
+    registry,
+    spawnSession(input) {
+      return executor.execute(input);
+    },
+    executionGuard: createExecutionGuard({})
+  });
+
+  return {
+    accept: taskRunner.accept,
+    awaitResult(input: {
+      task: TaskRequest;
+      childSessionKey: string;
+      runId?: string;
+    }) {
+      if (!input.runId) {
+        throw new Error(`Inbound task ${input.task.task_id} is missing a runId`);
+      }
+
+      return executor.awaitResult({
+        taskId: input.task.task_id,
+        runId: input.runId,
+        childSessionKey: input.childSessionKey
+      });
+    }
+  };
 }
 
 async function runSlashFromArgs(
@@ -415,6 +586,10 @@ async function runSlashFromArgs(
 
   if (command === "leave") {
     return slash.leave();
+  }
+
+  if (command === "publish") {
+    return slash.publish();
   }
 
   if (command === "peers") {

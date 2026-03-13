@@ -22,6 +22,12 @@ function createServiceDouble() {
           : "wss://agentpod.internal.example.com/substrate"
     })),
     stop: vi.fn(async () => undefined),
+    publishFromSource: vi.fn(async () => ({
+      ok: true as const,
+      peer_id: "peer_local",
+      service_count: 2,
+      peer_count: 1
+    })),
     snapshot: vi.fn(() => ({
       activeProfile: "public",
       peers: [{ peer_id: "peer_123" }],
@@ -77,6 +83,19 @@ describe("AgentPod owner-facing commands", () => {
     expect(service.stop).toHaveBeenCalledOnce();
   });
 
+  it("handles /agentpod publish", async () => {
+    const service = createServiceDouble();
+    const commands = createSlashCommands(service);
+
+    await expect(commands.publish()).resolves.toEqual({
+      ok: true,
+      peer_id: "peer_local",
+      service_count: 2,
+      peer_count: 1
+    });
+    expect(service.publishFromSource).toHaveBeenCalledOnce();
+  });
+
   it("supports CLI join output", async () => {
     const service = createServiceDouble();
     const cli = createCliCommands(service);
@@ -90,6 +109,18 @@ describe("AgentPod owner-facing commands", () => {
       ok: true,
       profileName: "public",
       network_id: "agentpod-public"
+    });
+  });
+
+  it("supports CLI publish output", async () => {
+    const service = createServiceDouble();
+    const cli = createCliCommands(service);
+
+    await expect(cli.publish()).resolves.toEqual({
+      ok: true,
+      peer_id: "peer_local",
+      service_count: 2,
+      peer_count: 1
     });
   });
 });

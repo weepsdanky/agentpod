@@ -70,6 +70,7 @@ export interface DeliveryPolicy {
 export interface TaskRequest {
   version: ProtocolVersion;
   task_id: string;
+  target_peer_id?: string;
   service: string;
   input: TaskInput;
   policy?: RequestPolicy;

@@ -72,7 +72,9 @@ Merge in the following block (copy from `examples/private-minimal/openclaw.json`
         "enabled": true,
         "config": {
           "statePath": ".openclaw/agentpod-state.json",
+          "identityPath": ".openclaw/agentpod-identity.json",
           "hubBaseUrl": "http://127.0.0.1:4590",
+          "runtimeSessionKey": "main",
           "autoJoinProfile": "team-a",
           "profiles": {
             "team-a": {
@@ -92,8 +94,10 @@ Merge in the following block (copy from `examples/private-minimal/openclaw.json`
 
 | Field | Purpose |
 |---|---|
-| `statePath` | Where the plugin stores peer cache, task history, and network credentials |
+| `statePath` | Where the plugin stores peer cache and task history |
+| `identityPath` | Where the plugin stores its durable local peer identity |
 | `hubBaseUrl` | The hub API base used for publishing capabilities, listing peers, and submitting tasks |
+| `runtimeSessionKey` | The OpenClaw session key used as the parent when spawning inbound task sessions |
 | `autoJoinProfile` | Profile name to join automatically when OpenClaw starts |
 | `profiles.<name>.mode` | `"managed"` for public networks, `"private"` for self-hosted |
 | `profiles.<name>.join_url` | (managed only) URL for the signed join manifest |
@@ -110,10 +114,11 @@ openclaw gateway restart
 
 On startup, the plugin:
 1. Loads its state from `statePath`
-2. Reads `autoJoinProfile`
-3. Fetches the join manifest (or derives endpoints from `base_url`)
-4. Exchanges credentials for a short-lived bearer token
-5. Populates the local peer cache from the hub directory
+2. Loads or creates its durable peer identity from `identityPath`
+3. Reads `autoJoinProfile`
+4. Fetches the join manifest (or derives endpoints from `base_url`)
+5. Exchanges credentials for a short-lived bearer token
+6. Populates the local peer cache from the hub directory
 
 Verify it loaded cleanly:
 
@@ -259,6 +264,7 @@ agentpod_delegate {
   "task": {
     "version": "0.1",
     "task_id": "task_001",
+    "target_peer_id": "peer_design_01",
     "service": "product_brainstorm",
     "input": {
       "payload": { "text": "Help brainstorm an MVP for a peer collaboration tool." },
@@ -281,7 +287,7 @@ Returns a `DelegationHandle` immediately:
 }
 ```
 
-The remote peer executes the task in a dedicated session. Progress and results flow back via SSE at `GET /v1/tasks/:taskId/events` on the hub.
+The hub queues the task into the target peer's mailbox. When that OpenClaw instance polls the hub, it executes the task in a dedicated session. Progress and results flow back via SSE at `GET /v1/tasks/:taskId/events` on the hub.
 
 ---
 

@@ -21,6 +21,12 @@ function createServiceDouble() {
           : "wss://agentpod.internal.example.com/substrate"
     })),
     stop: vi.fn(async () => undefined),
+    publishFromSource: vi.fn(async () => ({
+      ok: true as const,
+      peer_id: "peer_local",
+      service_count: 2,
+      peer_count: 1
+    })),
     snapshot: vi.fn(() => ({
       activeProfile: "public",
       peers: [{ peer_id: "peer_123" }],
@@ -78,5 +84,18 @@ describe("AgentPod gateway methods", () => {
     expect(privateJoin).toMatchObject({ ok: true, network_id: "team-a" });
     expect(leave).toEqual({ ok: true });
     expect(service.stop).toHaveBeenCalledOnce();
+  });
+
+  it("exposes publish through the gateway surface", async () => {
+    const service = createServiceDouble();
+    const methods = createGatewayMethods(service);
+
+    await expect(methods["agentpod.publish"]()).resolves.toEqual({
+      ok: true,
+      peer_id: "peer_local",
+      service_count: 2,
+      peer_count: 1
+    });
+    expect(service.publishFromSource).toHaveBeenCalledOnce();
   });
 });

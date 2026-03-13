@@ -48,6 +48,50 @@ describe("AgentPod plugin entrypoint", () => {
     });
   });
 
+  it("registers subagent lifecycle hooks for runtime-backed inbound execution", async () => {
+    const registerService = vi.fn();
+    const registerCli = vi.fn();
+    const registerCommand = vi.fn();
+    const registerGatewayMethod = vi.fn();
+    const registerTool = vi.fn();
+    const registerHook = vi.fn();
+
+    await agentpodPlugin.register?.({
+      pluginConfig: {
+        statePath: "/tmp/agentpod-state.json"
+      },
+      runtime: {
+        state: {
+          resolveStateDir: () => "/tmp"
+        },
+        subagent: {
+          run: vi.fn(async () => ({ runId: "run_123" })),
+          waitForRun: vi.fn(),
+          getSessionMessages: vi.fn(),
+          getSession: vi.fn(),
+          deleteSession: vi.fn()
+        }
+      },
+      registerService,
+      registerCli,
+      registerCommand,
+      registerGatewayMethod,
+      registerTool,
+      registerHook
+    } as any);
+
+    expect(registerHook).toHaveBeenCalledWith(
+      "subagent_spawned",
+      expect.any(Function),
+      expect.anything()
+    );
+    expect(registerHook).toHaveBeenCalledWith(
+      "subagent_ended",
+      expect.any(Function),
+      expect.anything()
+    );
+  });
+
   it("declares openclaw.extensions in plugin package metadata", async () => {
     const packageJson = JSON.parse(
       await readFile(new URL("../package.json", import.meta.url), "utf8")
@@ -74,10 +118,19 @@ describe("AgentPod plugin entrypoint", () => {
       statePath: {
         type: "string"
       },
+      agentpodDocPath: {
+        type: "string"
+      },
+      identityPath: {
+        type: "string"
+      },
       hubBaseUrl: {
         type: "string"
       },
       pluginToken: {
+        type: "string"
+      },
+      runtimeSessionKey: {
         type: "string"
       }
     });
