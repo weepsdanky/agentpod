@@ -28,6 +28,8 @@ It standardizes:
 It intentionally does not standardize:
 
 - multi-network routing
+- advanced operator endpoint-by-endpoint profiles
+- embedded-host convenience mode
 - semantic search
 - rich ranking or recommendation
 - reputation systems
@@ -57,7 +59,7 @@ AgentPod v0.1 has four logical roles:
 - `peer`
   - one AgentPod-enabled agent instance with a local identity
 - `hub`
-  - the thin operator-facing layer for join manifests, token exchange, public-card projection, and embedded-host packaging
+  - the thin operator-facing layer for join manifests, token exchange, and public-card projection
 - `substrate`
   - the underlying OpenAgents-backed discovery, task delegation, and artifact system
 
@@ -72,6 +74,9 @@ For v0.1:
 The v0.1 protocol follows these rules:
 
 - one peer has at most one active network at a time
+- the first implementation supports only:
+  - managed public join
+  - simple private join
 - the peer publishes one compiled `CapabilityManifest`
 - discovery is metadata-load-only
 - delivery is at-most-once
@@ -167,6 +172,11 @@ Rules:
 - `policy` is small and typed
 - `delivery` controls return path and artifact handling only
 - the sender must not automatically export hidden transcript or implicit memory
+
+For v0.1:
+- request policy is part of the task contract
+- published service policy in `CapabilityManifest` is only a default expression of provider intent
+- actual runtime behavior is still decided by local owner configuration and local execution guards
 
 ### `TaskUpdate`
 
@@ -354,6 +364,13 @@ Compiler rules:
 - service ids must be unique within one document
 - compile failure blocks publication
 
+Simplification rule:
+
+- `AGENTPOD.md` is primarily descriptive
+- it should focus on capability summary, service list, IO expectations, and safety notes
+- if it includes policy hints, those are published defaults only
+- local runtime policy is not sourced from markdown alone
+
 Refresh modes:
 
 - default: generate once and do not auto-refresh
@@ -394,22 +411,7 @@ Protocol assumptions:
   - `directory_url = {base_url}/directory`
   - `substrate_url = {base_url}/substrate`
 - all traffic is outbound from the OpenClaw host
-- the private hub hosts join/token/projection surfaces
-
-### Embedded-host join
-
-Recommended only for small labs:
-
-```bash
-openclaw agentpod host start
-openclaw agentpod join --network home-lab --base-url http://127.0.0.1:7777
-```
-
-In embedded-host mode:
-
-- one local `agentpod-hub` process starts
-- it wires join/token/projection endpoints plus OpenAgents-backed substrate access
-- the OpenClaw plugin still behaves like a normal client peer
+- the private hub may use a configured bearer token rather than the managed public join-manifest flow
 
 ## Discovery
 
@@ -476,6 +478,12 @@ Allowed failure:
 - a task may be lost if the substrate or peer fails at the wrong time
 
 This is intentional in v0.1 to keep the protocol easy to debug.
+
+Explicit simplification:
+
+- v0.1 does not define a crash-safe persisted state machine for at-most-once
+- v0.1 does not try to recover every lost event
+- simple duplicate suppression is sufficient for the initial implementation
 
 ## Context export boundary
 
@@ -549,6 +557,9 @@ These endpoints belong to `agentpod-hub`.
 - `POST /v1/join/exchange`
 - `POST /v1/tokens/renew`
 - `POST /v1/tokens/revoke`
+
+These are required for the managed public network.
+They are not required for the simplest private deployment path, which may rely on `base_url + bearer auth`.
 
 ### Public-card projection
 
@@ -630,7 +641,7 @@ The public AgentPod standard should stay AgentPod-shaped.
 An OpenClaw-based AgentPod peer is compliant with this document if it:
 
 1. generates a local peer identity
-2. joins one active network through managed, private, or embedded-host flow
+2. joins one active network through managed public or simple private flow
 3. publishes compiled `AGENTPOD.md` as a signed `CapabilityManifest`
 4. loads visible peer metadata into a local cache
 5. exposes local agent-facing tools for peer selection and delegation

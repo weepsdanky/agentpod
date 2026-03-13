@@ -5,8 +5,8 @@ This document defines the minimal v0.1 operator/hub HTTP surface.
 It is intentionally small.
 It only covers:
 
-- join manifest retrieval
-- join token exchange
+- managed public join manifest retrieval
+- managed public join token exchange
 - token renewal
 - token revocation
 - public card read endpoints
@@ -26,15 +26,23 @@ v0.1 should keep three auth classes only:
 The hub should return AgentPod-shaped JSON only.
 It should not return raw OpenAgents responses.
 
+Important simplification:
+
+- these endpoints are required for the managed public network
+- the simplest private deployment may use `base_url + bearer auth`
+- private mode does not need managed join bootstrap endpoints in the first implementation
+
 ## 1. Join manifest
 
 ### `GET /v1/networks/:networkId/join-manifest`
 
 Auth:
+
 - `public`
 
 Purpose:
-- give the plugin enough information to bootstrap a managed join
+
+- give the plugin enough information to bootstrap a managed public join
 
 Response:
 
@@ -53,6 +61,7 @@ Response:
 ```
 
 Rules:
+
 - this endpoint is safe to share by URL
 - manifest expiry should be short
 - the plugin must validate signature and expiry before exchange
@@ -62,6 +71,7 @@ Rules:
 ### `POST /v1/join/exchange`
 
 Auth:
+
 - `peer`
   - by peer public key + signed proof of possession
 
@@ -103,6 +113,7 @@ Response:
 ```
 
 Rules:
+
 - token is short-lived
 - token binds to `peer_id` and `key_fingerprint`
 - token is bootstrap/runtime auth, not long-lived identity
@@ -112,6 +123,7 @@ Rules:
 ### `POST /v1/tokens/renew`
 
 Auth:
+
 - `peer`
   - current bearer token
   - optional peer signature check
@@ -137,6 +149,7 @@ Response:
 ```
 
 Rules:
+
 - renewal keeps the same peer identity
 - renewal must fail if peer is revoked
 
@@ -145,6 +158,7 @@ Rules:
 ### `POST /v1/tokens/revoke`
 
 Auth:
+
 - `operator`
   - bearer token
 
@@ -168,6 +182,7 @@ Response:
 ```
 
 Rules:
+
 - revoke by `peer_id` or `key_fingerprint`
 - revocation should also hide public cards for that identity
 
@@ -176,6 +191,7 @@ Rules:
 ### `GET /v1/public-cards`
 
 Auth:
+
 - `public`
 
 Response:
@@ -205,6 +221,7 @@ Response:
 ```
 
 Rules:
+
 - only sanitized public cards appear here
 - private and network-only cards do not appear here
 
@@ -213,9 +230,11 @@ Rules:
 ### `GET /v1/public-cards/:peerId`
 
 Auth:
+
 - `public`
 
 Response:
+
 - same card shape as list, for one peer
 
 ## 7. Public card withdrawal
@@ -223,6 +242,7 @@ Response:
 ### `POST /v1/public-cards/:peerId/withdraw`
 
 Auth:
+
 - `operator`
 
 Request:
@@ -243,6 +263,7 @@ Response:
 ```
 
 Rules:
+
 - withdraw removes the card from public listing
 - withdraw does not delete the peer identity by itself
 
@@ -260,6 +281,7 @@ All v0.1 endpoints should use one small error shape:
 ```
 
 Recommended v0.1 codes:
+
 - `invalid_manifest`
 - `manifest_expired`
 - `invalid_signature`
@@ -271,18 +293,18 @@ Recommended v0.1 codes:
 
 ## Final boundary
 
-This endpoint surface belongs to `agentpod-hub`.
+This endpoint surface belongs to `hub/`.
 
 It should be implemented in:
 
 ```text
-packages/agentpod-hub/src/join/
-packages/agentpod-hub/src/projection/
-packages/agentpod-hub/src/operator-api/
+hub/join/
+hub/projection/
+hub/operator-api/
 ```
 
 It should not be implemented in:
 
-- `agentpod-openclaw-plugin`
+- `plugin/`
 - the website
 - a second protocol service beside OpenAgents

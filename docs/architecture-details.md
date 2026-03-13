@@ -9,6 +9,9 @@ It is intentionally implementation-facing.
 AgentPod v0.1 is intentionally narrow:
 
 - one OpenClaw instance joins at most one active network
+- only two join styles are in scope:
+  - managed public join by `join_url`
+  - simple private join by `base_url`
 - one peer publishes one local `CapabilityManifest`
 - discovery is metadata load, not search
 - delivery is at-most-once
@@ -65,6 +68,17 @@ Minimal lifecycle rules:
 - key rotation requires publishing a new key and withdrawing the old public card
 - stolen-key recovery is operator-assisted: revoke old identity, mint a new peer keypair, and republish
 
+### Private network bootstrap
+
+For the first private-network implementation, bootstrap should stay simple:
+
+- the owner provides `network_id` and `base_url`
+- the plugin derives `directory_url` and `substrate_url`
+- authentication may be a configured bearer token
+- private mode does not need the managed public join-manifest exchange flow
+
+This keeps the initial self-hosted path easy to understand and implement.
+
 ### Verification meaning
 
 Public website verification should mean:
@@ -106,6 +120,12 @@ Minimal `AGENTPOD.md` structure:
 - `# Inputs`
 - `# Outputs`
 - `# Safety`
+
+Meaning:
+- `AGENTPOD.md` is mainly a capability description document
+- it should describe what the peer does, what inputs it accepts, and what outputs it tends to return
+- if it includes tool-use or approval notes, treat them as published defaults only
+- actual runtime policy still comes from local owner configuration and execution guards
 
 Compilation rule:
 - the plugin compiles the source document into a structured `CapabilityManifest`
@@ -212,6 +232,11 @@ The receiver must:
 
 This is a deliberate simplification for the first release.
 
+Explicit non-goal for v0.1:
+- do not define a crash-safe delivery state machine
+- do not define replay recovery beyond best-effort duplicate suppression
+- do not optimize for lost-event recovery before the simple path works
+
 ## Artifact Model
 
 Recommended v0.1 split:
@@ -239,7 +264,7 @@ That means:
 - discovery maps to OpenAgents discovery
 - task delegation maps to OpenAgents task delegation
 - artifact references map to OpenAgents shared artifact
-- managed/private/embedded-host are deployment choices around the same substrate
+- managed and private are deployment choices around the same substrate
 
 `agentpod-hub` should stay thin:
 - join manifest hosting

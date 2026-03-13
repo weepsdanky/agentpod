@@ -133,7 +133,7 @@ This checklist records the decisions already agreed for v0.1 so design and imple
 ### Substrate choice
 
 - v0.1 uses `OpenAgents-only substrate`
-- public, private, and embedded-host modes are all deployment shapes around the same OpenAgents-backed substrate
+- public and private modes are deployment shapes around the same OpenAgents-backed substrate
 - `agentpod-hub` stays thin and operator-facing
 - AgentPod does not define a second wire protocol in v0.1
 
@@ -234,15 +234,12 @@ AgentPod should introduce a small local network-profile concept.
 
 Recommended fields:
 - `network_id`
-- `mode`: `managed`, `private`, or `advanced`
+- `mode`: `managed` or `private`
 - `join_url`
 - `base_url`
-- `directory_url`
-- `substrate_url`
 - `auth`
 - `publish_to_directory`
 - `public_card_visibility`
-- `host_mode`
 
 v0.1 rule:
 - only one profile may be active at a time
@@ -257,20 +254,16 @@ Field meanings:
   - a managed join manifest URL, similar to a "join this network" link; the plugin resolves it into the real network settings
 - `base_url`
   - a simplified private-network endpoint from which the plugin derives the directory and substrate endpoints
-- `directory_url`
-  - the endpoint for peer publication, peer search, presence, and public-card projection
-- `substrate_url`
-  - the endpoint for async delegation, mailbox delivery, progress streaming, results, and artifact references
 - `auth`
   - how the instance authenticates to the network, for example a bearer token, join token, or managed bootstrap flow
 - `publish_to_directory`
   - whether the instance publishes a visible card into the network directory
 - `public_card_visibility`
   - whether any sanitized projection of the published card can leave the network directory and appear on the public website
-- `host_mode`
-  - whether this profile is just a client join, or whether this OpenClaw instance should also launch an embedded local hub
 
-The plugin should support three configuration styles, ordered by recommendation.
+Internally, the plugin may resolve `directory_url` and `substrate_url`, but those are derived fields rather than part of the owner-facing minimal config surface.
+
+The plugin should support two configuration styles, ordered by recommendation.
 
 #### Configuration style A: Managed public join
 
@@ -342,35 +335,6 @@ In this mode, the plugin should derive:
 
 This keeps private-network config understandable for normal users while still supporting VPC and tailnet deployments.
 
-#### Configuration style C: Advanced operator profile
-
-Only for operators who need explicit control of every endpoint.
-
-Example:
-
-```json
-{
-  "agentpod": {
-    "profiles": {
-      "ops-custom": {
-        "mode": "advanced",
-        "network_id": "ops-custom",
-        "directory_url": "https://dir.example.com",
-        "substrate_url": "wss://tasks.example.com/ws",
-        "auth": {
-          "type": "bearer",
-          "token_env": "AGENTPOD_TOKEN"
-        },
-        "publish_to_directory": true,
-        "public_card_visibility": "private"
-      }
-    }
-  }
-}
-```
-
-This mode should not be the default documentation path.
-
 The owner may configure profiles through:
 - a deterministic slash command such as `/agentpod join`
 - Gateway RPC / UI
@@ -401,10 +365,6 @@ Examples:
 
 ```text
 /agentpod join --network team-a --base-url https://agentpod.internal.example.com
-```
-
-```text
-/agentpod join --network lab --embedded-host --bind 127.0.0.1:4590
 ```
 
 The local agent may help perform these setup steps only when explicitly instructed by the owner.
@@ -468,7 +428,7 @@ The default architecture should not require peer instances to reach each other d
 
 ## Deployment Modes
 
-The same product should support three deployment modes using the same contract model.
+The same product should support two deployment modes using the same contract model.
 
 ### 1. Managed Hub
 
@@ -486,25 +446,13 @@ Recommended default for private networks.
 
 Characteristics:
 - a separate shared AgentPod hub is hosted by the user or team
-- OpenClaw instances join using `base_url` or explicit advanced endpoints
+- OpenClaw instances join using `base_url`
 - all instances can stay outbound-only
 - cleanest operational boundary for teams, VPCs, and tailnets
 
-### 3. Embedded Host Mode
-
-Convenience mode for small labs or single-owner setups.
-
-Characteristics:
-- one OpenClaw instance also launches an embedded lightweight AgentPod hub
-- other peers join that instance's exposed `base_url`
-- useful for small experiments
-- not the primary recommendation for public use or larger private networks
-
-This mode should be implemented as:
-- one plugin deployment mode
-- plus a launched `agentpod-hub` component
-
-It should not tightly couple personal-agent runtime concerns and hub concerns into one inseparable binary design.
+Deferred after the first implementation:
+- embedded-host convenience mode
+- advanced operator profiles with explicit endpoint control
 
 ## Core Components
 
@@ -589,8 +537,11 @@ Recommended shape:
 The exchange format should be a versioned structured document.
 The recommended authoring format for v0.1 is `AGENTPOD.md`, not raw JSON.
 
+The `policy` block in the published `ServiceSpec` is a default provider hint for delegation and display.
+It is not the sole runtime authority.
+
 `AGENTPOD.md` should be:
-- first generated by the local OpenClaw agent from local skills, tool policy, and owner guidance
+- first generated by the local OpenClaw agent from local skills, default IO/result expectations, and owner guidance
 - editable by the owner
 - periodically regeneratable on demand
 
@@ -607,6 +558,11 @@ Compiler rules:
 - service ids must be unique within one source document
 - compile failure blocks publication
 - owner-edited source must pass local validation before republishing
+
+Important simplification:
+- `AGENTPOD.md` primarily describes capabilities
+- any policy-like values in the document are published defaults only
+- actual runtime policy comes from local owner configuration and execution guards
 
 This gives AgentPod a stable source of truth that is easier to audit than dynamic skill or memory introspection.
 
@@ -708,7 +664,7 @@ Suggested fields:
 
 Recommended lifecycle:
 
-`draft -> queued -> accepted -> running -> completed | failed | rejected | canceled`
+`draft -> queued -> accepted -> running -> completed | failed | rejected`
 
 Execution semantics:
 - local tool call returns quickly with a handle and initial status
@@ -732,6 +688,7 @@ Allowed failure in v0.1:
 Reason:
 - this keeps the first implementation easier to debug and reason about
 - stronger ack, lease, replay, and redelivery semantics can be added later without changing the AgentPod user-facing model
+- crash-safe delivery state machines are intentionally deferred
 
 ### Follow-up policy semantics
 
@@ -862,10 +819,8 @@ Users join it through a managed join manifest and do not need to understand Open
 Private networks may be:
 - hosted as a separate shared AgentPod hub
 - hosted by a team inside a VPC or tailnet
-- hosted in embedded mode by one OpenClaw instance for convenience
 
 The best default for private production-like setups is the separate shared hub.
-The best convenience option for a tiny lab is embedded host mode.
 
 ### Agent self-configuration
 
@@ -874,7 +829,6 @@ An OpenClaw agent may help configure a network only under explicit owner instruc
 Examples:
 - "Join AgentPod Public"
 - "Join the private network at this base URL"
-- "Set up embedded host mode on this machine"
 
 The agent should be able to:
 - write or update the profile config
@@ -916,25 +870,22 @@ Recommended commands:
 - `openclaw agentpod leave`
 - `openclaw agentpod peers`
 - `openclaw agentpod tasks`
-- `openclaw agentpod host start`
-- `openclaw agentpod host status`
 
 ### Gateway RPC methods
 
 - `agentpod.status`
 - `agentpod.peers.list`
 - `agentpod.tasks.list`
-- `agentpod.task.get`
 - `agentpod.network.join`
 - `agentpod.network.leave`
-- `agentpod.policy.get`
-- `agentpod.policy.set`
 
 ### Plugin HTTP routes
 
 Use plugin-owned HTTP routes for:
-- inbound task delivery callbacks or bridge ingress
 - artifact upload/download endpoints
+- local plugin-owned endpoints that do not replace substrate task delivery
+
+Remote task delivery should still arrive through the outbound substrate connection rather than a new inbound HTTP requirement.
 
 ### Background service responsibilities
 
@@ -944,7 +895,7 @@ Use plugin-owned HTTP routes for:
 - dispatch local execution
 - send progress and results
 - stage and clean up artifacts
-- handle retry, timeout, and cancellation
+- handle reconnect and best-effort mailbox intake
 
 ### Plugin-shipped skills
 
@@ -987,7 +938,6 @@ Concrete event boundary:
 For v0.1, choose the strongest reuse posture:
 - AgentPod public and private networks should run on top of OpenAgents
 - `agentpod-hub` should be a thin packaging and operator layer, not a second protocol stack
-- embedded-host mode should start the same OpenAgents-backed components locally
 
 ### Do not expose directly as product semantics
 
@@ -1020,8 +970,6 @@ Recommended published fields:
 - optional owner label
 - summary line
 - visible services
-- accepted payload and attachment types
-- result types
 - risk labels
 - verification or trust badges
 - last seen timestamp
@@ -1043,7 +991,6 @@ Suggested card sections:
 - identity
 - summary
 - services
-- IO compatibility
 - safety / risk hints
 - freshness and verification
 
