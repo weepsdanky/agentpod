@@ -302,4 +302,94 @@ describe("AgentPod hub router", () => {
       error: "token_expired"
     });
   });
+
+  it("supports peer listing, manifest publication, and delegated task events", async () => {
+    const router = createHubRouter({
+      mode: "managed",
+      networkId: "agentpod-public",
+      directoryUrl: "https://agentpod.ai/directory",
+      substrateUrl: "wss://agentpod.ai/substrate",
+      operatorKeyId: "operator-key-2026-03",
+      issuer: "agentpod-public-operator",
+      manifestSignature: "manifest-signature",
+      operatorToken: "operator-secret",
+      discoveryRecords: [],
+      peerProfiles: [
+        {
+          peer_id: "peer_123",
+          network_id: "agentpod-public",
+          display_name: "Design Peer",
+          public_key: "base64...",
+          key_fingerprint: "sha256:abcd...",
+          trust_signals: ["operator_verified"],
+          last_seen_at: "2026-03-12T10:54:00Z"
+        }
+      ]
+    });
+
+    const publish = await router.handle({
+      method: "POST",
+      path: "/v1/capabilities/publish",
+      body: {
+        manifest: {
+          version: "0.1",
+          peer_id: "peer_local",
+          issued_at: "2026-03-12T10:40:00Z",
+          expires_at: "2026-04-12T10:40:00Z",
+          signature: "base64...",
+          services: []
+        }
+      }
+    });
+    const peers = await router.handle({
+      method: "GET",
+      path: "/v1/peers"
+    });
+    const events: Array<{ kind: string; data: unknown }> = [];
+    router.subscribeTask("task_123", (event) => {
+      events.push(event);
+    });
+    const delegate = await router.handle({
+      method: "POST",
+      path: "/v1/tasks/delegate",
+      body: {
+        task: {
+          version: "0.1",
+          task_id: "task_123",
+          service: "product_brainstorm",
+          input: {
+            payload: { text: "Help brainstorm the MVP" },
+            attachments: []
+          },
+          delivery: {
+            reply: "origin_session",
+            artifacts: "inline_only"
+          }
+        }
+      }
+    });
+
+    expect(publish.status).toBe(200);
+    expect(router.publishedManifests()).toHaveLength(1);
+    expect(peers.body).toEqual({
+      peers: [
+        {
+          peer_id: "peer_123",
+          network_id: "agentpod-public",
+          display_name: "Design Peer",
+          public_key: "base64...",
+          key_fingerprint: "sha256:abcd...",
+          trust_signals: ["operator_verified"],
+          last_seen_at: "2026-03-12T10:54:00Z"
+        }
+      ]
+    });
+    expect(delegate.body).toEqual({
+      task_id: "task_123",
+      status: "queued"
+    });
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ kind: "update" });
+    expect(events[1]).toMatchObject({ kind: "result" });
+  });
 });

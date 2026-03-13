@@ -1,12 +1,15 @@
+import type { AgentPodClient, DelegationHandle } from "../client";
 import type { ManagedNetworkProfile, PeerProfile, PrivateNetworkProfile } from "../types/agentpod";
 import { resolveProfile, type ProfileResolverDependencies, type ResolvedProfile } from "../config";
 import { generateLocalPeerIdentity } from "../identity/keys";
 import { createStateStore, type AgentPodState } from "../state/store";
 import { createPeerCache } from "./peer-cache";
 import { createSubstrateSync } from "./substrate-sync";
+import type { CapabilityManifest, TaskRequest, TaskResult, TaskUpdate } from "../types/agentpod";
 
 interface BackgroundServiceOptions extends ProfileResolverDependencies {
   statePath: string;
+  client?: Pick<AgentPodClient, "publishManifest" | "listPeers" | "delegate" | "subscribeTask">;
 }
 
 type StartProfile = ManagedNetworkProfile | PrivateNetworkProfile;
@@ -14,7 +17,7 @@ type StartProfile = ManagedNetworkProfile | PrivateNetworkProfile;
 export function createBackgroundService(options: BackgroundServiceOptions) {
   const store = createStateStore(options.statePath);
   const peerCache = createPeerCache<PeerProfile>();
-  const substrateSync = createSubstrateSync(peerCache);
+  const substrateSync = createSubstrateSync(peerCache, options.client);
   const identity = generateLocalPeerIdentity();
 
   let running = false;
@@ -69,6 +72,44 @@ export function createBackgroundService(options: BackgroundServiceOptions) {
 
     async stop() {
       running = false;
+    },
+
+    async publishManifest(manifest: CapabilityManifest) {
+      await ensureLoaded();
+      const nextPeers = await substrateSync.publishAndRefresh(manifest);
+      state.peers = nextPeers;
+      await store.save(state);
+      return nextPeers;
+    },
+
+    async delegateTask(task: TaskRequest): Promise<DelegationHandle> {
+      await ensureLoaded();
+
+      if (!options.client) {
+        throw new Error("Background service requires client access for delegation");
+      }
+
+      const handle = await options.client.delegate(task);
+      state.tasks = [
+        ...state.tasks,
+        {
+          task_id: handle.task_id,
+          status: handle.status
+        }
+      ];
+      await store.save(state);
+      return handle;
+    },
+
+    async subscribeTask(
+      taskId: string,
+      onEvent: (event: TaskUpdate | TaskResult) => void
+    ) {
+      if (!options.client) {
+        throw new Error("Background service requires client access for subscriptions");
+      }
+
+      return options.client.subscribeTask(taskId, onEvent);
     },
 
     isRunning() {
