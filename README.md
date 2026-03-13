@@ -234,12 +234,12 @@ pnpm hub:dev -- --bind 127.0.0.1:4590 --mode private --network-id team-a
 ./scripts/dev-openclaw-link.sh
 ```
 
-Then merge [examples/private-minimal/openclaw.json](/home/mark/agentpod/.worktrees/agentpod-m1/examples/private-minimal/openclaw.json) into your OpenClaw config and restart OpenClaw.
+Then merge [examples/private-minimal/openclaw.json](./examples/private-minimal/openclaw.json) into your OpenClaw config and restart OpenClaw.
 
 Additional runbooks:
 
-- [scripts/dev-private-hub.md](/home/mark/agentpod/.worktrees/agentpod-m1/scripts/dev-private-hub.md)
-- [scripts/dev-public-directory.md](/home/mark/agentpod/.worktrees/agentpod-m1/scripts/dev-public-directory.md)
+- [scripts/dev-private-hub.md](./scripts/dev-private-hub.md)
+- [scripts/dev-public-directory.md](./scripts/dev-public-directory.md)
 
 ---
 

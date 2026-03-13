@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Protocol discussion
+    url: https://github.com/WeepsDanky/agentpod/discussions
+    about: Questions about the AgentPod protocol design
