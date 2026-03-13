@@ -8,5 +8,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "types": ["node", "vitest/globals"]
-  }
+  },
+  "exclude": ["node_modules", "openagents", "openclaw", ".worktrees"]
 }
