@@ -158,15 +158,42 @@ export function createHttpAgentPodTransport(
         headers.authorization = authorization;
       }
 
-      const response = await fetchImpl(`${baseUrl}${request.path}`, {
-        method: request.method,
-        headers,
-        body: request.body ? JSON.stringify(request.body) : undefined
-      });
-      const body = (await response.json()) as unknown;
+      const url = `${baseUrl}${request.path}`;
+      let response: Response;
+      try {
+        response = await fetchImpl(url, {
+          method: request.method,
+          headers,
+          body: request.body ? JSON.stringify(request.body) : undefined
+        });
+      } catch (error) {
+        const cause =
+          error instanceof Error && "cause" in error
+            ? (error as Error & { cause?: unknown }).cause
+            : undefined;
+        const causeText =
+          cause && typeof cause === "object"
+            ? JSON.stringify(cause, Object.getOwnPropertyNames(cause))
+            : String(cause ?? "");
+        throw new Error(
+          `AgentPod transport fetch failed for ${request.method} ${url}: ${error instanceof Error ? error.message : String(error)}${causeText ? ` | cause=${causeText}` : ""}`
+        );
+      }
+
+      const text = await response.text();
+      let body: unknown = null;
+      if (text.length > 0) {
+        try {
+          body = JSON.parse(text) as unknown;
+        } catch {
+          body = text;
+        }
+      }
 
       if (!response.ok) {
-        throw new Error(`AgentPod request failed: ${response.status}`);
+        throw new Error(
+          `AgentPod request failed: ${response.status} ${request.method} ${url}${text ? ` | body=${text.slice(0, 500)}` : ""}`
+        );
       }
 
       return body;
