@@ -106,7 +106,7 @@ describe("AgentPod runtime subagent executor", () => {
       artifacts: [
         {
           kind: "inline",
-          name: "quicksort.md",
+          name: "artifact.md",
           mime_type: "text/markdown",
           content: "# Quick Sort\n\nExample body"
         }
