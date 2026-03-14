@@ -477,6 +477,90 @@ describe("AgentPod hub router", () => {
     expect(events[1]).toMatchObject({ kind: "result" });
   });
 
+  it("supports console APIs for listing peers and enqueueing tasks to a target peer", async () => {
+    const identity = generateRuntimeIdentity();
+    const router = createHubRouter({
+      mode: "private",
+      networkId: "team-a",
+      directoryUrl: "http://127.0.0.1:4590/directory",
+      substrateUrl: "ws://127.0.0.1:4590/substrate",
+      operatorToken: "console-secret",
+      discoveryRecords: [],
+      peerProfiles: [
+        {
+          peer_id: identity.peer_id,
+          network_id: "team-a",
+          display_name: "Console Test Peer",
+          public_key: identity.public_key,
+          key_fingerprint: identity.key_fingerprint,
+          trust_signals: [],
+          last_seen_at: "2026-03-14T08:00:00Z"
+        }
+      ]
+    } as any);
+
+    const peers = await router.handle({
+      method: "GET",
+      path: "/v1/console/peers",
+      headers: { authorization: "Bearer console-secret" }
+    });
+    expect(peers.status).toBe(200);
+    expect(peers.body).toMatchObject({
+      peers: [expect.objectContaining({ peer_id: identity.peer_id })]
+    });
+
+    const enqueue = await router.handle({
+      method: "POST",
+      path: "/v1/console/tasks",
+      headers: { authorization: "Bearer console-secret" },
+      body: {
+        peer_id: identity.peer_id,
+        task: {
+          title: "Smoke test",
+          prompt: "Say hello",
+          input: {
+            payload: { text: "hello" }
+          },
+          metadata: { source: "console" }
+        }
+      }
+    });
+    expect(enqueue.status).toBe(200);
+    expect(enqueue.body).toMatchObject({ ok: true, peer_id: identity.peer_id, status: "queued" });
+
+    const listed = await router.handle({
+      method: "GET",
+      path: "/v1/console/tasks",
+      headers: { authorization: "Bearer console-secret" }
+    });
+    expect(listed.status).toBe(200);
+    expect(listed.body).toMatchObject({
+      tasks: [expect.objectContaining({ task_id: enqueue.body.task_id, status: "queued" })]
+    });
+
+    const claim = await router.handle({
+      method: "POST",
+      path: "/v1/runtime/mailbox/claim",
+      headers: { authorization: "Bearer console-secret" },
+      body: {
+        peer_id: identity.peer_id,
+        auth: createRuntimePeerAuth(identity, {
+          path: "/v1/runtime/mailbox/claim",
+          peer_id: identity.peer_id
+        })
+      }
+    });
+    expect(claim.status).toBe(200);
+
+    const detail = await router.handle({
+      method: "GET",
+      path: `/v1/console/tasks/${enqueue.body.task_id}`,
+      headers: { authorization: "Bearer console-secret" }
+    });
+    expect(detail.status).toBe(200);
+    expect(detail.body).toMatchObject({ task_id: enqueue.body.task_id, status: "claimed" });
+  });
+
   it("routes delegated work through an injected delivery handler instead of fabricating completion", async () => {
     const deliverTask = vi.fn(async ({ task, publish }) => {
       publish({

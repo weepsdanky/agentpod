@@ -40,6 +40,18 @@ interface TaskDeliveryContext {
   publish(event: TaskStreamEvent): void;
 }
 
+interface ConsoleTaskRecord {
+  task_id: string;
+  peer_id: string;
+  status: "queued" | "claimed" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+  task: TaskRequest;
+  timeline: Array<{ type: string; at: string; detail?: string }>;
+  result?: TaskResult;
+  last_update?: TaskUpdate;
+}
+
 interface HubRouterConfig extends HubConfig {
   discoveryRecords: DiscoveryRecord[];
   peerProfiles?: unknown[];
@@ -76,8 +88,31 @@ export function createHubRouter(config: HubRouterConfig) {
   const taskSubscribers = new Map<string, Array<(event: TaskStreamEvent) => void>>();
   const mailboxStore = createMailboxStore(config.mailboxStatePath);
   const taskBindings = new Map<string, string>();
+  const consoleTasks = new Map<string, ConsoleTaskRecord>();
 
   function publishTaskEvent(taskId: string, event: TaskStreamEvent) {
+    const existing = consoleTasks.get(taskId);
+    const now = new Date().toISOString();
+    if (existing) {
+      existing.updated_at = now;
+      if (event.kind === "update") {
+        existing.last_update = event.data;
+        existing.status = "claimed";
+        existing.timeline.push({
+          type: event.data.state,
+          at: event.data.timestamp ?? now,
+          detail: event.data.message
+        });
+      } else {
+        existing.result = event.data;
+        existing.status = event.data.status === "completed" ? "completed" : "failed";
+        existing.timeline.push({
+          type: event.data.status,
+          at: now
+        });
+      }
+    }
+
     for (const subscriber of taskSubscribers.get(taskId) ?? []) {
       subscriber(event);
     }
@@ -158,6 +193,39 @@ export function createHubRouter(config: HubRouterConfig) {
         };
       }
 
+      if (request.method === "GET" && request.path === "/v1/console/peers") {
+        if (request.headers?.authorization !== `Bearer ${config.operatorToken}`) {
+          return { status: 401, body: { error: "console_auth_required" } };
+        }
+
+        return {
+          status: 200,
+          body: {
+            peers: peerProfiles,
+            manifests: publishedCapabilityManifests
+          }
+        };
+      }
+
+      if (request.method === "GET" && request.path === "/v1/console/tasks") {
+        if (request.headers?.authorization !== `Bearer ${config.operatorToken}`) {
+          return { status: 401, body: { error: "console_auth_required" } };
+        }
+
+        return {
+          status: 200,
+          body: {
+            tasks: [...consoleTasks.values()].map((task) => ({
+              task_id: task.task_id,
+              peer_id: task.peer_id,
+              status: task.status,
+              created_at: task.created_at,
+              updated_at: task.updated_at
+            }))
+          }
+        };
+      }
+
       if (
         request.method === "GET" &&
         request.path === `/v1/networks/${config.networkId}/join-manifest`
@@ -218,6 +286,19 @@ export function createHubRouter(config: HubRouterConfig) {
         };
       }
 
+      const consoleTaskMatch = request.method === "GET"
+        ? request.path.match(/^\/v1\/console\/tasks\/([^/]+)$/)
+        : null;
+      if (consoleTaskMatch) {
+        if (request.headers?.authorization !== `Bearer ${config.operatorToken}`) {
+          return { status: 401, body: { error: "console_auth_required" } };
+        }
+        const task = consoleTasks.get(consoleTaskMatch[1]);
+        return task
+          ? { status: 200, body: task }
+          : { status: 404, body: { error: "task_not_found" } };
+      }
+
       const publicCardMatch = request.method === "GET"
         ? request.path.match(/^\/v1\/public-cards\/([^/]+)$/)
         : null;
@@ -228,6 +309,64 @@ export function createHubRouter(config: HubRouterConfig) {
         return card
           ? { status: 200, body: card }
           : { status: 404, body: { error: "card_not_public" } };
+      }
+
+      if (request.method === "POST" && request.path === "/v1/console/tasks") {
+        if (request.headers?.authorization !== `Bearer ${config.operatorToken}`) {
+          return { status: 401, body: { error: "console_auth_required" } };
+        }
+
+        const peerId = String(request.body?.peer_id ?? "");
+        const rawTask = (request.body?.task ?? {}) as Record<string, unknown>;
+        if (!peerId) {
+          return { status: 400, body: { error: "peer_id_required" } };
+        }
+
+        const taskId = `task_${Date.now().toString(36)}`;
+        const now = new Date().toISOString();
+        const task: TaskRequest = {
+          version: "0.1",
+          task_id: taskId,
+          target_peer_id: peerId,
+          service: typeof rawTask.service === "string" ? rawTask.service : "openclaw_debug",
+          input: {
+            payload:
+              rawTask.input && typeof rawTask.input === "object"
+                ? (rawTask.input as { payload?: Record<string, unknown> }).payload ?? {}
+                : {
+                    title: rawTask.title ?? "Console task",
+                    prompt: rawTask.prompt ?? "",
+                    input: rawTask.input ?? null,
+                    metadata: rawTask.metadata ?? { source: "console" }
+                  },
+            attachments: []
+          },
+          delivery: {
+            reply: "origin_session",
+            artifacts: "inline_only"
+          }
+        };
+
+        await mailboxStore.enqueue(peerId, task);
+        consoleTasks.set(taskId, {
+          task_id: taskId,
+          peer_id: peerId,
+          status: "queued",
+          created_at: now,
+          updated_at: now,
+          task,
+          timeline: [{ type: "queued", at: now }]
+        });
+
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            task_id: taskId,
+            peer_id: peerId,
+            status: "queued"
+          }
+        };
       }
 
       if (request.method === "POST" && request.path === "/v1/tasks/delegate") {
@@ -304,6 +443,13 @@ export function createHubRouter(config: HubRouterConfig) {
         }
         if (task) {
           taskBindings.set(task.task_id, runtimePeer.peerId);
+          const existing = consoleTasks.get(task.task_id);
+          if (existing) {
+            const now = new Date().toISOString();
+            existing.status = "claimed";
+            existing.updated_at = now;
+            existing.timeline.push({ type: "claimed", at: now });
+          }
         }
 
         return {
