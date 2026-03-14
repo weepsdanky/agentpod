@@ -91,7 +91,22 @@ Examples:
 
 ### 1. Install it into OpenClaw
 
-Right now AgentPod is usually installed from source during development.
+#### Option A: install from npm (recommended)
+
+Install the published package directly from npm:
+
+```bash
+openclaw plugins install @agentpod/agentpod
+openclaw plugins enable agentpod
+```
+
+Then restart OpenClaw:
+
+```bash
+openclaw gateway restart
+```
+
+#### Option B: install from source
 
 Clone the repo, install dependencies, and link the plugin into OpenClaw:
 
@@ -107,6 +122,8 @@ Then restart OpenClaw:
 ```bash
 openclaw gateway restart
 ```
+
+The `-l` (symlink) flag used by the link script means any local rebuild is picked up immediately without reinstalling.
 
 For a fuller setup walkthrough, start with:
 
