@@ -42,6 +42,30 @@ describe("AgentPod runtime subagent executor", () => {
     });
   });
 
+  it("falls back to the owner session when no spawned child session is observed", async () => {
+    const tracker = createSubagentTracker();
+    const executor = createRuntimeSubagentExecutor({
+      sessionKey: "owner_session",
+      runtime: {
+        run: vi.fn(async () => ({ runId: "run_timeout" }))
+      },
+      tracker,
+      spawnTimeoutMs: 1
+    });
+
+    await expect(
+      executor.execute({
+        taskId: "task_timeout",
+        service: "product_brainstorm",
+        payload: { text: "fallback" },
+        attachments: []
+      })
+    ).resolves.toEqual({
+      runId: "run_timeout",
+      childSessionKey: "owner_session"
+    });
+  });
+
   it("waits for completion and synthesizes a task result from child session messages", async () => {
     const tracker = createSubagentTracker();
     const executor = createRuntimeSubagentExecutor({

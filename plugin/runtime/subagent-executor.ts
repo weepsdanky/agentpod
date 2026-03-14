@@ -55,11 +55,18 @@ export function createRuntimeSubagentExecutor({
         idempotencyKey: `agentpod:${input.taskId}`
       });
 
-      const spawned = await tracker.waitForSpawned(runId, spawnTimeoutMs);
-      return {
-        runId,
-        childSessionKey: spawned.childSessionKey
-      };
+      try {
+        const spawned = await tracker.waitForSpawned(runId, spawnTimeoutMs);
+        return {
+          runId,
+          childSessionKey: spawned.childSessionKey
+        };
+      } catch {
+        return {
+          runId,
+          childSessionKey: sessionKey
+        };
+      }
     },
 
     async awaitResult(input: {
