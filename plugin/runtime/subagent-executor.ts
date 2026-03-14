@@ -234,12 +234,6 @@ function extractArtifacts(message: unknown): ArtifactRef[] {
       .filter((artifact): artifact is ArtifactRef => Boolean(artifact));
   }
 
-  if (Array.isArray(candidate.content)) {
-    return candidate.content
-      .map((part) => normalizeArtifact(part))
-      .filter((artifact): artifact is ArtifactRef => Boolean(artifact));
-  }
-
   return [];
 }
 
@@ -273,14 +267,14 @@ function normalizeArtifact(input: unknown): ArtifactRef | undefined {
         ? candidate.mimeType
         : undefined;
   const url = typeof candidate.url === "string" ? candidate.url : undefined;
-  const content =
-    typeof candidate.content === "string"
-      ? candidate.content
-      : typeof candidate.text === "string"
-        ? candidate.text
-        : undefined;
+  const content = typeof candidate.content === "string" ? candidate.content : undefined;
+  const declaredType = typeof candidate.type === "string" ? candidate.type : undefined;
+  const declaredKind = typeof candidate.kind === "string" ? candidate.kind : undefined;
+  const looksLikeArtifact = Boolean(
+    name || url || mimeType || declaredType === "artifact" || declaredKind === "inline" || declaredKind === "relay"
+  );
 
-  if (!name && !url && !content) {
+  if (!looksLikeArtifact || (!name && !url && !content)) {
     return undefined;
   }
 
