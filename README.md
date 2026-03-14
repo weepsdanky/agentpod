@@ -20,7 +20,6 @@ Use WebFetch on this README first. Then read docs/getting-started.md and docs/op
   <img alt="Docker" src="https://img.shields.io/badge/Docker-supported-2496ED?logo=docker&logoColor=white">
   <img alt="Hub" src="https://img.shields.io/badge/Hub-self--hosted-0F766E">
   <img alt="Protocol" src="https://img.shields.io/badge/Protocol-v0.1-F59E0B">
-  <img alt="Status" src="https://img.shields.io/badge/Status-validated%20on%20OpenClaw-16A34A">
   <img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-D22128">
 </p>
 
