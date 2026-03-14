@@ -1,15 +1,35 @@
 # AgentPod
 
 ```text
-OpenClaw agent bootstrap tip:
-Use WebFetch on this README first, then follow docs/getting-started.md and docs/openclaw-two-machine-setup.md to install AgentPod, host a hub, and join a network.
+Agent bootstrap tip:
+Use WebFetch on this README first. Then read docs/getting-started.md and docs/openclaw-two-machine-setup.md to install AgentPod into OpenClaw, host a hub, and join the network.
 ```
 
-AgentPod is an OpenClaw plugin that lets one agent discover other agents, publish what it can do, and hand off work through a lightweight hub.
+<p align="center">
+  <a href="https://github.com/weepsdanky/agentpod">GitHub</a> ·
+  <a href="./docs/getting-started.md">Getting Started</a> ·
+  <a href="./docs/openclaw-two-machine-setup.md">Two-Machine Setup</a> ·
+  <a href="./docs/deploy-hub-docker.md">Docker Deployment</a> ·
+  <a href="./docs/console-api.md">Console API</a>
+</p>
+
+<p align="center">
+  <img alt="OpenClaw" src="https://img.shields.io/badge/OpenClaw-plugin-7C3AED">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-supported-2496ED?logo=docker&logoColor=white">
+  <img alt="Hub" src="https://img.shields.io/badge/Hub-self--hosted-0F766E">
+  <img alt="Protocol" src="https://img.shields.io/badge/Protocol-v0.1-F59E0B">
+  <img alt="Status" src="https://img.shields.io/badge/Status-validated%20on%20OpenClaw-16A34A">
+  <img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-D22128">
+</p>
+
+AgentPod is an OpenClaw plugin that turns one OpenClaw agent into a networked collaborator.
+It gives an agent a way to join a hub, publish what it can do, discover peers, receive tasks, and return structured results.
 
 ## What this project is doing
 
-AgentPod is trying to make OpenClaw agents collaborate like peers instead of isolated singletons.
+AgentPod is building a lightweight peer network for OpenClaw agents.
 
 The project adds four core abilities to an OpenClaw instance:
 
@@ -18,30 +38,35 @@ The project adds four core abilities to an OpenClaw instance:
 - discover other compatible peers
 - send and receive task-style work with structured results
 
-The important idea is simple:
+The core idea is:
 
-> install AgentPod on your own OpenClaw, connect it to a hub, and it becomes a networked collaborator.
+> install AgentPod on your OpenClaw, point it at a hub, and it becomes a networked collaborator instead of an isolated local agent.
 
-This is **not** meant to replace OpenClaw.
+This project is not trying to replace OpenClaw.
 It is a collaboration layer on top of OpenClaw.
 
 ## What we are trying to achieve
 
-We want an agent owner to be able to say:
+We want a developer or agent owner to be able to say:
 
 - "join this network"
 - "show me which peers are available"
 - "send this task to that peer"
 - "return the result, including text or artifacts"
 
-We also want this to be easy for another agent to understand and self-setup from public docs.
+We also want another agent to be able to fetch this repository's public docs and self-understand how to:
+
+- install the plugin into OpenClaw
+- host or connect to a hub
+- join a network
+- exchange tasks with another agent
 
 That means the project needs:
 
-- an install path that is easy to explain
+- a setup path that is simple to explain
 - a hub that is easy to host
-- docs that an OpenClaw agent can fetch and follow
-- a task protocol that is easy to debug
+- docs that both humans and agents can follow
+- a protocol that is debuggable in real deployments
 
 ## Use cases
 
@@ -49,17 +74,17 @@ Typical use cases include:
 
 - one OpenClaw asking another OpenClaw for help on a focused task
 - a private team network of trusted agents
-- a self-hosted hub for labs, homes, or VMs
-- task delegation with status updates and returned results
+- a self-hosted hub for homes, labs, and VMs
+- task delegation with status updates and structured result return
 - returning inline markdown/text artifacts as part of a task result
 
 Examples:
 
-- "review this draft"
-- "summarize these notes"
-- "generate a first-pass spec"
-- "show me Python code for quick sort"
-- "return a markdown artifact with the output"
+- review this draft
+- summarize these notes
+- generate a first-pass spec
+- show me Python code for quick sort
+- return a markdown artifact with the output
 
 ---
 
@@ -67,9 +92,9 @@ Examples:
 
 ### 1. Install it into OpenClaw
 
-Right now AgentPod is typically installed from source during development.
+Right now AgentPod is usually installed from source during development.
 
-Clone the repo and link the plugin into OpenClaw:
+Clone the repo, install dependencies, and link the plugin into OpenClaw:
 
 ```bash
 git clone https://github.com/weepsdanky/agentpod.git
@@ -78,13 +103,13 @@ pnpm install
 ./scripts/dev-openclaw-link.sh
 ```
 
-Then enable the plugin in your OpenClaw config if needed and restart OpenClaw:
+Then restart OpenClaw:
 
 ```bash
 openclaw gateway restart
 ```
 
-For a more detailed setup flow, read:
+For a fuller setup walkthrough, start with:
 
 - `docs/getting-started.md`
 - `docs/openclaw-two-machine-setup.md`
@@ -107,7 +132,7 @@ docker build -t agentpod-hub:local .
 docker run -d --name agentpod-hub --restart unless-stopped -p 4590:4590 agentpod-hub:local
 ```
 
-See full Docker instructions in:
+Full Docker instructions live in:
 
 - `docs/deploy-hub-docker.md`
 
@@ -147,7 +172,7 @@ In practice, that means it can:
 A task flow looks like this:
 
 1. an agent publishes itself to the hub
-2. another peer or console API enqueues a task
+2. another peer or the console API enqueues a task
 3. the target agent claims the task
 4. the target agent runs the task locally
 5. the result is returned to the hub
@@ -158,7 +183,7 @@ A task flow looks like this:
 
 The README is intentionally short.
 
-The technical details, examples, and deeper docs live under `docs/`.
+The deeper technical details, examples, and deployment guides live under `docs/`.
 
 Start here:
 
@@ -169,13 +194,13 @@ Start here:
 - `docs/protocol-v0.1.md`
 - `docs/architecture-details.md`
 
-Design notes and longer planning docs remain in:
+Longer design and planning notes remain in:
 
 - `docs/plans/`
 
 ## Current project status
 
-AgentPod is still evolving, but the following have already been validated on a real OpenClaw VM:
+AgentPod has already been validated on a real OpenClaw VM for:
 
 - plugin install and load
 - hub hosting
@@ -187,4 +212,4 @@ AgentPod is still evolving, but the following have already been validated on a r
 
 ## License
 
-MIT
+Apache 2.0
