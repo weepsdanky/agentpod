@@ -96,18 +96,20 @@ export function createHubRouter(config: HubRouterConfig) {
     if (existing) {
       existing.updated_at = now;
       if (event.kind === "update") {
-        existing.last_update = event.data;
+        const update = event.data as TaskUpdate;
+        existing.last_update = update;
         existing.status = "claimed";
         existing.timeline.push({
-          type: event.data.state,
-          at: event.data.timestamp ?? now,
-          detail: event.data.message
+          type: update.state,
+          at: update.timestamp ?? now,
+          detail: update.message
         });
       } else {
-        existing.result = event.data;
-        existing.status = event.data.status === "completed" ? "completed" : "failed";
+        const result = event.data as TaskResult;
+        existing.result = result;
+        existing.status = result.status === "completed" ? "completed" : "failed";
         existing.timeline.push({
-          type: event.data.status,
+          type: result.status,
           at: now
         });
       }
@@ -295,7 +297,7 @@ export function createHubRouter(config: HubRouterConfig) {
         }
         const task = consoleTasks.get(consoleTaskMatch[1]);
         return task
-          ? { status: 200, body: task }
+          ? { status: 200, body: task as unknown as Record<string, unknown> }
           : { status: 404, body: { error: "task_not_found" } };
       }
 
