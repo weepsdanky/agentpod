@@ -180,7 +180,15 @@ export function createHttpAgentPodTransport(
         );
       }
 
-      const text = await response.text();
+      const rawText = typeof (response as Response & { text?: unknown }).text === "function"
+        ? await response.text()
+        : undefined;
+      const text =
+        typeof rawText === "string"
+          ? rawText
+          : typeof (response as Response & { json?: unknown }).json === "function"
+            ? JSON.stringify(await response.json())
+            : "";
       let body: unknown = null;
       if (text.length > 0) {
         try {
