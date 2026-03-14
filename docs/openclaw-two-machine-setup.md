@@ -179,7 +179,88 @@ openclaw agentpod tasks
 
 ---
 
-## 四、常见问题
+## 四、腾讯云跨机接入（公网 IP 版本）
+
+如果两台 OpenClaw 不在同一台机器、也不在同一个仅本地可见的回环环境里，那么第二台机器不能使用 `127.0.0.1` 作为 hub 地址，而应该使用第一台机器的**公网 IP** 或两台机器之间可直连的**内网 IP**。
+
+当前这台宿主机已探测到的公网 IP 为：
+
+```text
+43.131.3.244
+```
+
+### 1. 第一台机器（Hub 宿主机）
+
+确保 hub 以对外监听方式启动：
+
+```bash
+cd /root/.openclaw/workspace/tmp/agentpod
+pnpm hub:dev -- --bind 0.0.0.0:4590 --mode private --network-id team-a
+```
+
+或后台运行：
+
+```bash
+cd /root/.openclaw/workspace/tmp/agentpod
+nohup pnpm hub:dev -- --bind 0.0.0.0:4590 --mode private --network-id team-a >/tmp/agentpod-hub.log 2>&1 < /dev/null &
+```
+
+### 2. 腾讯云安全组 / 防火墙
+
+至少要允许：
+
+- 协议：`TCP`
+- 端口：`4590`
+- 来源：第二台机器所在网段，或者你测试时临时允许公网来源
+
+如果安全组未放通，即使 hub 已经监听 `0.0.0.0:4590`，第二台机器也无法连接。
+
+### 3. 第二台机器 join 时应使用公网地址
+
+在第二台 OpenClaw 上使用：
+
+```bash
+openclaw agentpod join team-a --base-url http://43.131.3.244:4590 --network-id team-a
+openclaw agentpod publish
+openclaw agentpod peers
+openclaw agentpod tasks
+```
+
+### 4. 第一台机器也可以用公网地址做自检（可选）
+
+如果希望配置和文档统一，也可以在第一台机器上显式使用公网地址：
+
+```bash
+openclaw agentpod join team-a --base-url http://43.131.3.244:4590 --network-id team-a
+openclaw agentpod publish
+```
+
+不过如果 hub 与 plugin 在同机，使用 `127.0.0.1` 通常更稳定；公网地址更适合给第二台机器接入使用。
+
+### 5. 公网验证建议
+
+在第二台机器上先做最小连通性验证：
+
+```bash
+curl http://43.131.3.244:4590/v1/peers
+```
+
+如果返回：
+
+```json
+{"peers":[]}
+```
+
+说明网络连通基本正常，此时再继续：
+
+```bash
+openclaw agentpod join team-a --base-url http://43.131.3.244:4590 --network-id team-a
+openclaw agentpod publish
+```
+
+---
+
+## 五、常见问题
 
 ### 1. `publish` 报 `fetch failed`
 
@@ -210,7 +291,7 @@ openclaw agentpod tasks
 
 ---
 
-## 五、当前已知本地验证结果
+## 六、当前已知本地验证结果
 
 以下流程已经在第一台宿主机上实际验证通过：
 
