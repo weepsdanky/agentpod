@@ -1,11 +1,51 @@
 {
   "name": "@agentpod/agentpod",
-  "private": true,
-  "type": "module",
+  "version": "0.1.0",
   "description": "AgentPod plugin for OpenClaw.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weepsdanky/agentpod.git",
+    "directory": "plugin"
+  },
+  "homepage": "https://github.com/weepsdanky/agentpod#readme",
+  "bugs": {
+    "url": "https://github.com/weepsdanky/agentpod/issues"
+  },
+  "keywords": [
+    "agentpod",
+    "openclaw",
+    "plugin",
+    "agents",
+    "multi-agent",
+    "typescript"
+  ],
+  "files": [
+    "artifacts",
+    "commands",
+    "http",
+    "identity",
+    "policy",
+    "runtime",
+    "service",
+    "source-doc",
+    "state",
+    "tasks",
+    "tools",
+    "types",
+    "client.ts",
+    "config.ts",
+    "index.ts",
+    "openclaw.plugin.json"
+  ],
   "openclaw": {
     "extensions": [
       "./index.ts"
     ]
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }
